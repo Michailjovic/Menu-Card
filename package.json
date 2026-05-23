@@ -1,6 +1,6 @@
 {
   "name": "room-navbar-card",
-  "version": "0.0.14",
+  "version": "0.1.0",
   "scripts": {
     "build": "rollup -c rollup.config.js",
     "watch": "rollup -c rollup.config.js --watch"
@@ -9,5 +9,6 @@
     "@rollup/plugin-node-resolve": "^15.0.0",
     "lit": "^3.0.0",
     "rollup": "^4.0.0"
-  }
+  },
+  "description": "Shared navigation bar Lovelace card with per-room images, filters, sensors"
 }

@@ -1,6 +1,4 @@
 {
   "name": "Room Navbar Card",
-  "description": "Sdílené navigační menu pro Home Assistant dashboardy s výkonovými optimalizacemi.",
-  "render_readme": true,
-  "homeassistant": "2024.1.0"
+  "render_readme": true
 }
