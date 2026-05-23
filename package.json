@@ -1,0 +1,13 @@
+{
+  "name": "room-navbar-card",
+  "version": "0.0.14",
+  "scripts": {
+    "build": "rollup -c rollup.config.js",
+    "watch": "rollup -c rollup.config.js --watch"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "lit": "^3.0.0",
+    "rollup": "^4.0.0"
+  }
+}
