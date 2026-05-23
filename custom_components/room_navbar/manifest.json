@@ -1,7 +1,7 @@
 {
   "domain": "room_navbar",
   "name": "Room Navbar Card",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "documentation": "https://github.com/michals-home/room-navbar-card",
   "requirements": [],
   "dependencies": ["frontend", "http"],

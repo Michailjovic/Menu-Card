@@ -173,7 +173,11 @@ class RoomFilterSensor(SensorEntity):
         room_id: str,
         room_config: dict[str, Any],
     ) -> None:
-        self.hass = hass
+        # _hass_ref is our own reference used before async_added_to_hass runs.
+        # self.hass is the HA framework property – it is None until the platform
+        # finishes adding the entity, so we cannot rely on it inside __init__
+        # or inside update_room_config called from a storage listener.
+        self._hass_ref = hass
         self._config_id = config_id
         self._room_id = room_id
         self._room_config = room_config
@@ -233,6 +237,9 @@ class RoomFilterSensor(SensorEntity):
     def update_room_config(self, new_config: dict[str, Any]) -> None:
         """Aktualizuje konfiguraci pokoje a přepočítá state."""
         self._room_config = new_config
+        # Guard: hass may not be set yet if async_added_to_hass hasn't run
+        if not self._effective_hass:
+            return
         new_value = self._compute_filter()
         if new_value != self._attr_native_value:
             self._attr_native_value = new_value
@@ -250,6 +257,11 @@ class RoomFilterSensor(SensorEntity):
     # ------------------------------------------------------------------
     # Výpočet filtru
     # ------------------------------------------------------------------
+
+    @property
+    def _effective_hass(self) -> HomeAssistant | None:
+        """Vrátí hass – přednostně HA framework property, jinak vlastní referenci."""
+        return self.hass if self.hass is not None else self._hass_ref
 
     def _build_tracked_entities(self) -> list[str]:
         """Vrátí seznam entit, na jejichž změnu sensor reaguje."""
@@ -269,19 +281,22 @@ class RoomFilterSensor(SensorEntity):
     def _compute_filter(self) -> str:
         """Vypočítá CSS filter string z aktuálních stavů HA entit."""
         cfg = self._room_config
+        hass = self._effective_hass
+        if hass is None:
+            return cfg.get("filter_off", DEFAULT_FILTER_OFF)
 
         # 1. Světlo zapnuto?
         light_entity = cfg.get("light_entity")
         if light_entity:
-            light_state = self.hass.states.get(light_entity)
+            light_state = hass.states.get(light_entity)
             if light_state and light_state.state == "on":
                 return cfg.get("filter_on", DEFAULT_FILTER_ON)
 
         # 2. Denní světlo přes žaluzie?
         blind_entity = cfg.get("blind_entity")
         if blind_entity:
-            blind_state = self.hass.states.get(blind_entity)
-            sun_state = self.hass.states.get("sun.sun")
+            blind_state = hass.states.get(blind_entity)
+            sun_state = hass.states.get("sun.sun")
             try:
                 blind_pct = float(blind_state.state) if blind_state else 100.0
             except (ValueError, TypeError):

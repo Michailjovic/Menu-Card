@@ -1,5 +1,5 @@
 /**
- * room-navbar-card  v0.0.9
+ * room-navbar-card  v0.0.10
  *
  * Performance-optimized shared navigation menu for HA dashboards.
  *
@@ -15,7 +15,7 @@
  *   Falls back to local JS computation if sensor doesn't exist.
  */
 
-const VERSION = "0.0.9";
+const VERSION = "0.0.10";
 const CARD_TAG = "room-navbar-card";
 const EDITOR_TAG = "room-navbar-card-editor";
 const SENSOR_PREFIX = "rnc";
@@ -902,6 +902,15 @@ class RoomNavbarCardEditor extends HTMLElement {
     `;
 
     this._attachDomListeners();
+
+    // Propagate hass to ha-entity-picker elements created by innerHTML above.
+    // HA's Lovelace framework does not auto-propagate hass into shadow DOM
+    // built via innerHTML, so we do it manually after every render.
+    if (this._hass) {
+      this.shadowRoot.querySelectorAll("ha-entity-picker").forEach(p => {
+        p.hass = this._hass;
+      });
+    }
   }
 
   _renderRoom(room, idx) {
@@ -1173,8 +1182,7 @@ class RoomNavbarCardEditor extends HTMLElement {
         if (!room) return;
         if (!room[ak] || typeof room[ak] !== "object") room[ak] = {};
         room[ak].action = e.target.value;
-        this._renderEditorContent();
-        this._attachDomListeners();
+        this._render();
       });
     });
 
