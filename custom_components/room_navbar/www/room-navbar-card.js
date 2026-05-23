@@ -1,5 +1,5 @@
 /**
- * room-navbar-card  v0.0.8
+ * room-navbar-card  v0.0.9
  *
  * Performance-optimized shared navigation menu for HA dashboards.
  *
@@ -15,7 +15,7 @@
  *   Falls back to local JS computation if sensor doesn't exist.
  */
 
-const VERSION = "0.0.8";
+const VERSION = "0.0.9";
 const CARD_TAG = "room-navbar-card";
 const EDITOR_TAG = "room-navbar-card-editor";
 const SENSOR_PREFIX = "rnc";
