@@ -303,6 +303,9 @@ class RoomNavbarCard extends i {
             entity_id: room.light_entity,
           });
         break;
+      case 'fire-dom-event':
+        fireEvent(window, 'll-custom', cfg.browser_mod ?? {});
+        break;
     }
   }
 
@@ -325,8 +328,16 @@ class RoomNavbarCard extends i {
       ? this.hass?.states[room.humidity_sensor]?.state : null;
     const label   = room.label ?? '';
 
+    const lightOn  = room.light_entity
+      ? this.hass?.states[room.light_entity]?.state === 'on' : false;
+    const border   = lightOn
+      ? (room.border_on  ?? '1px solid rgba(255,165,0,0.45)')
+      : (room.border_off ?? '1px solid rgba(255,255,255,0.1)');
+    const overlayOpacity = (room.overlay_image_url && lightOn) ? '1' : '0';
+
     return b`
       <div class="room-btn"
+        style="border:${border};"
         @click=${() => this._onClick(room)}
         @pointerdown=${() => this._onPointerDown(room)}
         @pointerup=${() => this._onPointerUp(room)}
@@ -339,10 +350,13 @@ class RoomNavbarCard extends i {
           transition-duration: ${room.transition_filter ?? '1.5s'};
         "></div>
 
-        <!-- Optional overlay image -->
+        <!-- Optional overlay image (opacity transition on light state) -->
         ${room.overlay_image_url ? b`
-          <div class="room-overlay"
-            style="background-image:url('${room.overlay_image_url}');"></div>
+          <div class="room-overlay" style="
+            background-image:url('${room.overlay_image_url}');
+            opacity:${overlayOpacity};
+            transition:opacity ${room.transition_filter ?? '1.5s'} ease;
+          "></div>
         ` : A}
 
         <!-- Bottom gradient -->
@@ -373,9 +387,28 @@ class RoomNavbarCard extends i {
     if (!this.hass) return room.filter_off ?? DEFAULT_OFF;
     const ls = room.light_entity
       ? this.hass.states[room.light_entity] : null;
-    return ls?.state === 'on'
-      ? (room.filter_on  ?? DEFAULT_ON)
-      : (room.filter_off ?? DEFAULT_OFF);
+    if (ls?.state === 'on') return room.filter_on ?? DEFAULT_ON;
+
+    // Day condition: sun entity + optional blind threshold
+    if (room.filter_day) {
+      const sunState  = room.sun_entity
+        ? this.hass.states[room.sun_entity]?.state : null;
+      const wantedSun = room.sun_state ?? 'above_horizon';
+      const sunOk     = sunState === wantedSun;
+
+      let blindOk = true;
+      if (room.blind_entity != null) {
+        const blindVal = parseFloat(
+          this.hass.states[room.blind_entity]?.state ?? '100'
+        );
+        const threshold = room.blind_threshold ?? 50;
+        blindOk = blindVal < threshold;
+      }
+
+      if (sunOk && blindOk) return room.filter_day;
+    }
+
+    return room.filter_off ?? DEFAULT_OFF;
   }
 }
 
@@ -717,14 +750,12 @@ class RoomNavbarCardEditor extends i {
         border-radius: 6px; font-size: 12px; cursor: pointer;
       }
       .rnc-btn-add:hover { background: rgba(255,255,255,0.12); }
-
       .rnc-empty {
         font-size: 13px; color: var(--secondary-text-color);
         padding: 20px; text-align: center;
         border: 1px dashed var(--divider-color, rgba(255,255,255,0.15));
         border-radius: 8px; margin-bottom: 8px;
       }
-
       .rnc-room-card {
         border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
         border-radius: 10px; margin-bottom: 8px; overflow: hidden;
@@ -735,19 +766,11 @@ class RoomNavbarCardEditor extends i {
         background: rgba(255,255,255,0.04);
       }
       .rnc-room-header:hover { background: rgba(255,255,255,0.07); }
-      .rnc-chevron {
-        font-size: 10px; color: var(--secondary-text-color);
-        transition: transform .2s; flex-shrink: 0;
-      }
+      .rnc-chevron { font-size: 10px; color: var(--secondary-text-color); transition: transform .2s; flex-shrink: 0; }
       .rnc-chevron.open { transform: rotate(90deg); }
       .rnc-room-name { flex: 1; font-size: 13px; font-weight: 500; }
-      .rnc-btn-delete {
-        background: none; border: none; cursor: pointer;
-        font-size: 14px; color: var(--error-color, #cf6679); padding: 4px;
-      }
-
+      .rnc-btn-delete { background: none; border: none; cursor: pointer; font-size: 14px; color: var(--error-color, #cf6679); padding: 4px; }
       .rnc-body { padding: 14px; }
-
       .rnc-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
       .rnc-lbl { flex: 0 0 140px; font-size: 12px; color: var(--secondary-text-color); }
       .rnc-hint { font-size: 10px; opacity: .7; font-style: italic; }
@@ -759,14 +782,12 @@ class RoomNavbarCardEditor extends i {
         border-radius: 6px; font-size: 13px;
       }
       .rnc-inp:focus { outline: none; border-color: var(--primary-color); }
-
       .rnc-sub {
         font-size: 11px; font-weight: 600; text-transform: uppercase;
         letter-spacing: .4px; color: var(--secondary-text-color);
         margin: 14px 0 6px; padding-top: 10px;
         border-top: 1px solid var(--divider-color, rgba(255,255,255,0.08));
       }
-
       .rnc-filters { display: flex; gap: 8px; flex-wrap: wrap; }
       .rnc-filter-block {
         flex: 1; min-width: 140px;
@@ -774,27 +795,16 @@ class RoomNavbarCardEditor extends i {
         border: 1px solid rgba(255,255,255,0.08);
         border-radius: 8px; padding: 10px 12px;
       }
-      .rnc-filter-title {
-        font-size: 10px; font-weight: 700; text-transform: uppercase;
-        letter-spacing: .5px; color: var(--secondary-text-color); margin-bottom: 8px;
-      }
+      .rnc-filter-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--secondary-text-color); margin-bottom: 8px; }
       .rnc-preview {
         width: 100%; height: 30px; border-radius: 4px; margin-bottom: 10px;
-        background: linear-gradient(135deg,
-          #0d1b2a 0%, #1b3a5c 20%, #2e6da4 40%, #e8a045 60%, #f5d76e 80%, #fff 100%);
+        background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 20%, #2e6da4 40%, #e8a045 60%, #f5d76e 80%, #fff 100%);
       }
       .rnc-slider-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
       .rnc-icon  { flex: 0 0 20px; font-size: 12px; text-align: center; }
       .rnc-slider { flex: 1; height: 4px; cursor: pointer; accent-color: var(--primary-color); }
-      .rnc-val {
-        flex: 0 0 36px; font-size: 10px; text-align: right;
-        color: var(--primary-text-color); font-family: monospace;
-      }
-      .rnc-raw {
-        font-size: 9px; color: var(--secondary-text-color); font-family: monospace;
-        margin-top: 6px; word-break: break-all; line-height: 1.4;
-        padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);
-      }
+      .rnc-val { flex: 0 0 36px; font-size: 10px; text-align: right; color: var(--primary-text-color); font-family: monospace; }
+      .rnc-raw { font-size: 9px; color: var(--secondary-text-color); font-family: monospace; margin-top: 6px; word-break: break-all; line-height: 1.4; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06); }
     </style>`;
   }
 }
