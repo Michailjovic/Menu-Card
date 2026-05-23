@@ -1,21 +1,21 @@
 /**
- * room-navbar-card  v1.0.0
+ * room-navbar-card  v0.0.8
  *
- * Výkonnostně optimalizované sdílené navigační menu pro HA dashboardy.
+ * Performance-optimized shared navigation menu for HA dashboards.
  *
- * Architektura:
- *   - _fullRender()    → staví DOM jednou při načtení konfigurace
- *   - _updateStates()  → mění POUZE atributy které se lišší od předchozího stavu
- *                        (voláno přes requestAnimationFrame – max 1× per frame)
+ * Architecture:
+ *   - _fullRender()    → builds DOM once when config is loaded
+ *   - _updateStates()  → changes ONLY attributes that differ from previous state
+ *                        (called via requestAnimationFrame – max 1× per frame)
  *
- * Optimalizace filtru:
- *   Karta nejprve hledá sensor.rnc_{config_id}_{room_id}_filter vytvořený
- *   Python backendem. Pokud sensor existuje, použije jeho stav (server-side výpočet,
- *   prohlížeč nedostane WS zprávu dokud se filtr skutečně nezmění).
- *   Pokud sensor neexistuje, padne zpět na lokální JS výpočet.
+ * Filter optimization:
+ *   Card first looks for sensor.rnc_{config_id}_{room_id}_filter created by
+ *   Python backend. If sensor exists, uses its state (server-side computation,
+ *   browser doesn't receive WS message until filter actually changes).
+ *   Falls back to local JS computation if sensor doesn't exist.
  */
 
-const VERSION = "1.0.0";
+const VERSION = "0.0.8";
 const CARD_TAG = "room-navbar-card";
 const EDITOR_TAG = "room-navbar-card-editor";
 const SENSOR_PREFIX = "rnc";
@@ -46,6 +46,36 @@ function humColor(val) {
   const n = parseFloat(val);
   if (isNaN(n)) return "rgba(255,255,255,0.7)";
   return n >= 60 ? "#ff4d4f" : n >= 55 ? "#faad14" : "#52c41a";
+}
+
+/**
+ * Parse a CSS filter string into its numeric components.
+ * Returns defaults when a component is missing.
+ */
+function parseFilter(filterStr) {
+  const str = filterStr ?? "";
+  const get = (fn) => {
+    const m = str.match(new RegExp(fn + "\\(([^)]+)\\)"));
+    return m ? parseFloat(m[1]) : null;
+  };
+  return {
+    brightness: get("brightness") ?? 1.0,
+    saturate:   get("saturate")   ?? 1.0,
+    sepia:      get("sepia")      ?? 0.0,
+    hueRotate:  get("hue-rotate") ?? 0.0,
+  };
+}
+
+/**
+ * Build a CSS filter string from numeric components.
+ * Omits components at their default values.
+ */
+function buildFilter({ brightness, saturate, sepia, hueRotate }) {
+  const parts = [`brightness(${brightness.toFixed(2)})`];
+  if (sepia > 0.005)                parts.push(`sepia(${sepia.toFixed(2)})`);
+  if (Math.abs(saturate - 1) > 0.01) parts.push(`saturate(${saturate.toFixed(2)})`);
+  if (Math.abs(hueRotate) > 0.5)   parts.push(`hue-rotate(${Math.round(hueRotate)}deg)`);
+  return parts.join(" ");
 }
 
 // ---------------------------------------------------------------------------
@@ -87,7 +117,7 @@ class ActionHandler {
 
     const onCancel = () => {
       clearTimeout(this._timer);
-      this._fired = true; // potlačí tap při scroll
+      this._fired = true; // suppress tap on scroll
     };
 
     this._el.addEventListener("mousedown", onDown);
@@ -99,7 +129,7 @@ class ActionHandler {
 }
 
 // ---------------------------------------------------------------------------
-// Hlavní karta
+// Main card
 // ---------------------------------------------------------------------------
 
 class RoomNavbarCard extends HTMLElement {
@@ -107,12 +137,12 @@ class RoomNavbarCard extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
 
-    this._cardConfig = null;   // konfigurace z card YAML (config_id nebo rooms)
-    this._menuConfig = null;   // načtená menu konfigurace (rooms array)
+    this._cardConfig = null;   // card YAML config (config_id or rooms)
+    this._menuConfig = null;   // loaded menu config (rooms array)
     this._hass = null;
     this._configLoaded = false;
 
-    // Cache předchozích hodnot pro inkrementální update
+    // Cache of previous values for incremental update
     // { roomId: { filter, lightOn, border, temp, hum } }
     this._prev = {};
 
@@ -133,19 +163,19 @@ class RoomNavbarCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config) throw new Error("room-navbar-card: chybí konfigurace");
+    if (!config) throw new Error("room-navbar-card: missing configuration");
     this._cardConfig = config;
-    this._configLoaded = false; // Reset – při změně config_id znovu načteme
+    this._configLoaded = false; // Reset – reload on config_id change
 
     if (config.rooms && Array.isArray(config.rooms)) {
-      // Inline mód (bez backendu)
+      // Inline mode (no backend)
       this._applyMenuConfig({ rooms: config.rooms });
     } else if (this._hass) {
-      // hass je již nastaven (např. editor změnil config_id) → načteme hned
+      // hass already set (e.g. editor changed config_id) → load immediately
       this._loadConfigFromBackend();
     } else {
-      // Čekáme na první set hass
-      this._renderPlaceholder("Načítám konfiguraci…");
+      // Waiting for first hass set
+      this._renderPlaceholder("Loading configuration…");
     }
   }
 
@@ -154,10 +184,10 @@ class RoomNavbarCard extends HTMLElement {
     this._hass = hass;
 
     if (firstSet && this._cardConfig?.config_id && !this._configLoaded) {
-      // První nastavení hass → načteme config z backendu
+      // First hass set → load config from backend
       this._loadConfigFromBackend();
     } else if (this._menuConfig) {
-      // Běžný update stavů
+      // Regular state update
       this._scheduleUpdate();
     }
   }
@@ -167,7 +197,7 @@ class RoomNavbarCard extends HTMLElement {
   }
 
   // ------------------------------------------------------------------
-  // Načítání konfigurace z backendu
+  // Load config from backend
   // ------------------------------------------------------------------
 
   async _loadConfigFromBackend() {
@@ -179,9 +209,9 @@ class RoomNavbarCard extends HTMLElement {
       this._configLoaded = true;
       this._applyMenuConfig(result);
     } catch (err) {
-      console.warn(`[RoomNavbar] Backend nedostupný nebo config '${this._cardConfig.config_id}' neexistuje:`, err);
+      console.warn(`[RoomNavbar] Backend unavailable or config '${this._cardConfig.config_id}' not found:`, err);
       this._renderPlaceholder(
-        `⚠️ Konfigurace '${this._cardConfig?.config_id}' nenalezena.\nNainstalujte integraci a vytvořte konfiguraci.`
+        `⚠️ Configuration '${this._cardConfig?.config_id}' not found.\nInstall the integration and create a configuration.`
       );
     }
   }
@@ -193,13 +223,13 @@ class RoomNavbarCard extends HTMLElement {
   }
 
   // ------------------------------------------------------------------
-  // Plný render (volá se jen při změně konfigurace)
+  // Full render (called only on config change)
   // ------------------------------------------------------------------
 
   _fullRender() {
     const rooms = this._menuConfig?.rooms ?? [];
     if (!rooms.length) {
-      this._renderPlaceholder("Žádné pokoje v konfiguraci.");
+      this._renderPlaceholder("No rooms in configuration.");
       return;
     }
 
@@ -222,7 +252,6 @@ class RoomNavbarCard extends HTMLElement {
         min-height: 83px;
         cursor: pointer;
         border: 1px solid rgba(255,255,255,0.1);
-        /* Žádné will-change tady – zapneme jen při animaci */
         transition: border-color 0.3s ease;
         -webkit-tap-highlight-color: transparent;
         user-select: none;
@@ -310,7 +339,7 @@ class RoomNavbarCard extends HTMLElement {
 
     this.shadowRoot.innerHTML = `<style>${style}</style><div class="navbar">${roomsHtml}</div>`;
 
-    // Inicializace prev cache a action handlerů
+    // Initialize prev cache and action handlers
     for (const room of rooms) {
       const el = this.shadowRoot.querySelector(`[data-room="${room.id}"]`);
       if (!el) continue;
@@ -348,7 +377,7 @@ class RoomNavbarCard extends HTMLElement {
   }
 
   // ------------------------------------------------------------------
-  // Inkrementální update (voláno přes rAF)
+  // Incremental update (called via rAF)
   // ------------------------------------------------------------------
 
   _scheduleUpdate() {
@@ -373,7 +402,6 @@ class RoomNavbarCard extends HTMLElement {
       if (newFilter !== prev.filter) {
         const bgEl = root.querySelector(`[data-room-bg="${rid}"]`);
         if (bgEl) {
-          // Zapneme will-change jen na dobu animace
           bgEl.classList.add("animating");
           bgEl.style.filter = newFilter;
           bgEl.addEventListener("transitionend", () => bgEl.classList.remove("animating"), { once: true });
@@ -399,7 +427,7 @@ class RoomNavbarCard extends HTMLElement {
         prev.border = newBorder;
       }
 
-      // ── Teplota ───────────────────────────────────────────────────
+      // ── Temperature ───────────────────────────────────────────────
       if (room.temp_sensor) {
         const tempVal = this._hass.states[room.temp_sensor]?.state;
         if (tempVal !== prev.temp) {
@@ -409,7 +437,7 @@ class RoomNavbarCard extends HTMLElement {
         }
       }
 
-      // ── Vlhkost ───────────────────────────────────────────────────
+      // ── Humidity ──────────────────────────────────────────────────
       if (room.humidity_sensor) {
         const humVal = this._hass.states[room.humidity_sensor]?.state;
         if (humVal !== prev.hum) {
@@ -424,11 +452,11 @@ class RoomNavbarCard extends HTMLElement {
   }
 
   // ------------------------------------------------------------------
-  // Výpočet filtru – server-side sensor má přednost
+  // Filter computation – server-side sensor takes priority
   // ------------------------------------------------------------------
 
   _computeFilter(room) {
-    // Preferujeme pre-computed sensor z Python backendu
+    // Prefer pre-computed sensor from Python backend
     if (this._cardConfig?.config_id) {
       const sensorId = `sensor.${SENSOR_PREFIX}_${this._cardConfig.config_id}_${room.id}_filter`;
       const s = this._hass?.states[sensorId];
@@ -437,26 +465,17 @@ class RoomNavbarCard extends HTMLElement {
       }
     }
 
-    // JS fallback (inline mód nebo backend není dostupný)
+    // JS fallback (inline mode or backend unavailable)
     if (!this._hass) return room.filter_off ?? "brightness(0.6)";
 
     const lightOn = this._hass.states[room.light_entity]?.state === "on";
     if (lightOn) return room.filter_on ?? "brightness(1.8) sepia(0.2)";
 
-    if (room.blind_entity) {
-      const blind = this._hass.states[room.blind_entity];
-      const sun = this._hass.states["sun.sun"];
-      const blindPct = parseFloat(blind?.state ?? "100");
-      if (blindPct < (room.blind_threshold ?? 36) && sun?.state === "above_horizon") {
-        return room.filter_day ?? "brightness(1.3)";
-      }
-    }
-
     return room.filter_off ?? "brightness(0.6)";
   }
 
   // ------------------------------------------------------------------
-  // Akce
+  // Actions
   // ------------------------------------------------------------------
 
   _handleAction(room, action) {
@@ -481,7 +500,6 @@ class RoomNavbarCard extends HTMLElement {
         break;
 
       case "fire-dom-event":
-        // browser_mod.popup a další ll-custom eventy
         fireEvent(this, "ll-custom", action);
         break;
 
@@ -496,36 +514,36 @@ class RoomNavbarCard extends HTMLElement {
         break;
 
       default:
-        console.warn(`[RoomNavbar] Neznámý typ akce: ${action.action}`);
+        console.warn(`[RoomNavbar] Unknown action type: ${action.action}`);
     }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Inline card editor – plný GUI editor konfigurace
+// Inline card editor – full GUI configuration editor
 // ---------------------------------------------------------------------------
 
 const ACTION_TYPES = [
-  { value: "none",           label: "žádná" },
-  { value: "navigate",       label: "Navigace" },
-  { value: "more-info",      label: "Více informací" },
-  { value: "toggle",         label: "Přepnout světlo" },
+  { value: "none",           label: "None" },
+  { value: "navigate",       label: "Navigate" },
+  { value: "more-info",      label: "More info" },
+  { value: "toggle",         label: "Toggle light" },
   { value: "fire-dom-event", label: "Popup (browser_mod)" },
-  { value: "call-service",   label: "Volat službu (JSON)" },
+  { value: "call-service",   label: "Call service (JSON)" },
 ];
 
 class RoomNavbarCardEditor extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this._cardConfig   = {};   // YAML config karty (config_id)
-    this._menuConfig   = null; // config načtená z backendu { name, rooms[] }
+    this._cardConfig   = {};   // card YAML config (config_id)
+    this._menuConfig   = null; // config loaded from backend { name, rooms[] }
     this._hass         = null;
-    this._availConfigs = null; // seznam existujících konfigurací
+    this._availConfigs = null; // list of existing configurations
     this._expanded     = new Set();
     this._saving       = false;
     this._saveStatus   = null; // null | "ok" | "err"
-    this._backendOk    = true; // false pokud integrace není přítomna
+    this._backendOk    = true; // false if integration is not present
   }
 
   // ------------------------------------------------------------------
@@ -534,7 +552,7 @@ class RoomNavbarCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    // Aktualizujeme entity pickery bez re-renderu
+    // Update entity pickers without re-render
     this.shadowRoot.querySelectorAll("ha-entity-picker").forEach(p => { p.hass = hass; });
     if (this._availConfigs === null) this._fetchConfigs();
   }
@@ -552,7 +570,7 @@ class RoomNavbarCardEditor extends HTMLElement {
   }
 
   // ------------------------------------------------------------------
-  // Backend komunikace
+  // Backend communication
   // ------------------------------------------------------------------
 
   async _fetchConfigs() {
@@ -564,12 +582,11 @@ class RoomNavbarCardEditor extends HTMLElement {
       this._availConfigs = [];
       this._backendOk = false;
     }
-    // Pokud máme config_id ale menuConfig ještě není, načteme z backendu
     if (this._cardConfig.config_id && !this._menuConfig) {
       await this._loadMenuConfig(this._cardConfig.config_id);
     } else if (!this._menuConfig) {
-      // Inline mód (rooms přímo v YAML, bez config_id) – inicializujeme z nich.
-      // Taky sem dopadne zcela nová karta bez ničeho.
+      // Inline mode (rooms directly in YAML, no config_id) – initialize from them.
+      // Also applies to a brand new card with nothing set.
       this._menuConfig = {
         name: "",
         rooms: this._cardConfig.rooms ? [...this._cardConfig.rooms] : [],
@@ -588,7 +605,7 @@ class RoomNavbarCardEditor extends HTMLElement {
       });
       this._menuConfig = r;
     } catch {
-      // Konfigurace ještě neexistuje → začneme prázdnou
+      // Config doesn't exist yet → start empty
       this._menuConfig = { name: configId, rooms: [] };
     }
     this._render();
@@ -597,11 +614,11 @@ class RoomNavbarCardEditor extends HTMLElement {
   async _saveConfig() {
     if (this._saving || !this._menuConfig) return;
     const configId = this._cardConfig.config_id?.trim();
-    if (!configId) { alert("Zadej Config ID."); return; }
+    if (!configId) { alert("Enter a Config ID first."); return; }
 
-    // Validace: každý pokoj musí mít id
+    // Validation: every room must have an id
     for (const r of this._menuConfig.rooms ?? []) {
-      if (!r.id?.trim()) { alert("Každý pokoj musí mít vyplněné ID."); return; }
+      if (!r.id?.trim()) { alert("Every room must have an ID set."); return; }
     }
 
     this._saving = true;
@@ -615,9 +632,7 @@ class RoomNavbarCardEditor extends HTMLElement {
         config_data: this._menuConfig,
       });
       this._saveStatus = "ok";
-      // Aktualizujeme seznam konfigurací
       await this._fetchConfigs();
-      // Informujeme HA editor že config_id se (možná) změnil
       this._emitConfigChanged({ config_id: configId });
     } catch (e) {
       this._saveStatus = "err";
@@ -631,7 +646,7 @@ class RoomNavbarCardEditor extends HTMLElement {
   }
 
   // ------------------------------------------------------------------
-  // Model manipulace
+  // Model manipulation
   // ------------------------------------------------------------------
 
   _ensureMenuConfig() {
@@ -650,11 +665,9 @@ class RoomNavbarCardEditor extends HTMLElement {
       overlay_image_url: "",
       temp_sensor: "",
       humidity_sensor: "",
-      filter_off: "brightness(0.6) saturate(1.0)",
-      filter_on:  "brightness(1.8) sepia(0.2) saturate(1.2)",
-      filter_day: "brightness(1.3) saturate(1.05)",
-      blind_entity: "",
-      blind_threshold: 36,
+      filter_off: "brightness(0.60) saturate(1.00)",
+      filter_on:  "brightness(1.80) sepia(0.20) saturate(1.20)",
+      filter_day: "brightness(1.30) saturate(1.05)",
       transition_filter: "1.5s",
       transition_overlay: "2.0s",
       tap_action: { action: "navigate", navigation_path: "" },
@@ -674,7 +687,7 @@ class RoomNavbarCardEditor extends HTMLElement {
     this._render();
   }
 
-  /** Aktualizuje pole v pokoji BEZ re-renderu (volá se z change eventů). */
+  /** Update a field in a room WITHOUT re-render (called from change events). */
   _setField(roomId, field, value) {
     const room = this._menuConfig?.rooms.find(r => r.id === roomId);
     if (!room) return;
@@ -700,7 +713,7 @@ class RoomNavbarCardEditor extends HTMLElement {
     } else {
       room[actionKey] = { action: newType };
     }
-    this._render(); // akce mění strukturu → re-render
+    this._render(); // action changes structure → re-render
   }
 
   // ------------------------------------------------------------------
@@ -713,22 +726,22 @@ class RoomNavbarCardEditor extends HTMLElement {
     const rooms       = menuConfig?.rooms ?? [];
     const availIds    = this._availConfigs?.map(c => c.id) ?? [];
 
-    const S = (s) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const S = (s) => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 
-    // ── Stavová záhlaví ──────────────────────────────────────────────
+    // ── Status banners ───────────────────────────────────────────────
     const backendBanner = !this._backendOk ? `
       <div class="banner warn">
-        ⚠️ Integrace <strong>Room Navbar</strong> není nainstalována nebo nedostupná.<br>
-        Přidej ji přes <em>Nastavení → Integrace</em> a restartuj HA.
+        ⚠️ Integration <strong>Room Navbar</strong> is not installed or unavailable.<br>
+        Add it via <em>Settings → Integrations</em> and restart HA.
       </div>` : "";
 
     const isNew = this._backendOk && configId && !availIds.includes(configId);
     const newBanner = isNew ? `
       <div class="banner info">
-        ✨ Konfigurace <strong>${S(configId)}</strong> ještě neexistuje – vyplň pokoje a klikni <em>Uložit</em>.
+        ✨ Configuration <strong>${S(configId)}</strong> doesn't exist yet – fill in rooms and click <em>Save</em>.
       </div>` : "";
 
-    // ── Config ID sekce ──────────────────────────────────────────────
+    // ── Config ID section ────────────────────────────────────────────
     const existingOptions = (this._availConfigs ?? [])
       .filter(c => c.id !== configId)
       .map(c => `<option value="${S(c.id)}">${S(c.name)} (${c.room_count})</option>`)
@@ -736,52 +749,52 @@ class RoomNavbarCardEditor extends HTMLElement {
 
     const configSection = `
       <div class="section">
-        <div class="section-title">Konfigurace</div>
+        <div class="section-title">Configuration</div>
         <div class="field-row">
           <label class="field-label">Config ID</label>
           <input id="inp-config-id" class="field-input" type="text"
                  value="${S(configId)}" placeholder="main_navbar"
-                 title="Technický identifikátor (snake_case). Musí být stejný na všech dashboardech kde kartu použiješ.">
+                 title="Technical identifier (snake_case). Must be the same on all dashboards where you use the card.">
         </div>
         ${existingOptions ? `
         <div class="field-row">
-          <label class="field-label">Načíst existující</label>
+          <label class="field-label">Load existing</label>
           <select id="sel-existing" class="field-input">
-            <option value="">── vybrat ──</option>
+            <option value="">── select ──</option>
             ${existingOptions}
           </select>
         </div>` : ""}
         <div class="field-row">
-          <label class="field-label">Název menu</label>
+          <label class="field-label">Menu name</label>
           <input id="inp-menu-name" class="field-input" type="text"
                  value="${S(menuConfig?.name ?? configId)}" placeholder="Main Navbar">
         </div>
       </div>`;
 
-    // ── Pokoje ───────────────────────────────────────────────────────
+    // ── Rooms ────────────────────────────────────────────────────────
     const roomsHtml = rooms.map((room, idx) => this._renderRoom(room, idx)).join("");
 
     const roomsSection = `
       <div class="section">
         <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
-          <span>Pokoje (${rooms.length})</span>
-          <button id="btn-add-room" class="btn-secondary">+ Přidat pokoj</button>
+          <span>Rooms (${rooms.length})</span>
+          <button id="btn-add-room" class="btn-secondary">+ Add room</button>
         </div>
-        ${rooms.length === 0 ? `<div class="empty-rooms">Žádné pokoje. Klikni <em>Přidat pokoj</em> pro začátek.</div>` : ""}
+        ${rooms.length === 0 ? `<div class="empty-rooms">No rooms. Click <em>Add room</em> to start.</div>` : ""}
         ${roomsHtml}
       </div>`;
 
-    // ── Uložit ───────────────────────────────────────────────────────
+    // ── Save ─────────────────────────────────────────────────────────
     const statusHtml = this._saveStatus === "ok"
-      ? `<span class="status-ok">✓ Uloženo</span>`
+      ? `<span class="status-ok">✓ Saved</span>`
       : this._saveStatus === "err"
-      ? `<span class="status-err">✗ Chyba – zkontroluj HA logy</span>`
+      ? `<span class="status-err">✗ Error – check HA logs</span>`
       : "";
 
     const saveSection = `
       <div class="section save-row">
         <button id="btn-save" class="btn-primary" ${this._saving ? "disabled" : ""}>
-          ${this._saving ? "Ukládám…" : "💾 Uložit konfiguraci"}
+          ${this._saving ? "Saving…" : "💾 Save configuration"}
         </button>
         ${statusHtml}
       </div>`;
@@ -839,6 +852,45 @@ class RoomNavbarCardEditor extends HTMLElement {
       .action-block { padding: 10px; background: rgba(255,255,255,0.03);
                       border: 1px solid rgba(255,255,255,0.07); border-radius: 8px; margin-bottom: 8px; }
       .action-label { font-size: 11px; color: var(--secondary-text-color); margin-bottom: 6px; }
+
+      /* ── Filter editor ─────────────────────────────────────────── */
+      .filter-panels { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+      .filter-block {
+        flex: 1; min-width: 140px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 8px;
+        padding: 10px 12px;
+      }
+      .filter-title {
+        font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+        color: var(--secondary-text-color); margin-bottom: 8px;
+      }
+      .filter-preview-bar {
+        width: 100%; height: 32px; border-radius: 5px; margin-bottom: 10px;
+        background: linear-gradient(135deg,
+          #0d1b2a 0%, #1b3a5c 20%, #2e6da4 40%,
+          #e8a045 60%, #f5d76e 80%, #ffffff 100%);
+        transition: filter 0.4s ease;
+      }
+      .filter-slider-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+      .filter-prop { flex: 0 0 22px; font-size: 13px; text-align: center; }
+      .filter-slider {
+        flex: 1; height: 4px; cursor: pointer;
+        accent-color: var(--primary-color);
+      }
+      .filter-val {
+        flex: 0 0 36px; font-size: 10px; text-align: right;
+        color: var(--primary-text-color); font-family: monospace;
+      }
+      .filter-raw {
+        font-size: 9px; color: var(--secondary-text-color);
+        font-family: monospace; margin-top: 7px;
+        word-break: break-all; line-height: 1.4;
+        padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);
+      }
+      .transition-row { display: flex; gap: 8px; }
+      .transition-row .field-row { flex: 1; }
     `;
 
     this.shadowRoot.innerHTML = `
@@ -846,7 +898,7 @@ class RoomNavbarCardEditor extends HTMLElement {
       ${backendBanner}
       ${newBanner}
       ${configSection}
-      ${menuConfig !== null ? roomsSection + saveSection : '<div class="empty-rooms">Načítám…</div>'}
+      ${menuConfig !== null ? roomsSection + saveSection : '<div class="empty-rooms">Loading…</div>'}
     `;
 
     this._attachDomListeners();
@@ -859,81 +911,65 @@ class RoomNavbarCardEditor extends HTMLElement {
 
     const body = open ? `
       <div class="room-body">
-        <!-- Základní -->
-        <div class="sub-title">Základní</div>
+
+        <!-- Basic -->
+        <div class="sub-title">Basic</div>
         <div class="field-row">
-          <label class="field-label">ID místnosti</label>
+          <label class="field-label">Room ID</label>
           <input class="field-input" type="text" data-r="${S(rid)}" data-f="id" value="${S(rid)}"
-                 placeholder="bedroom" title="snake_case, unikátní v rámci konfigurace">
+                 placeholder="bedroom" title="snake_case, unique within the configuration">
         </div>
         <div class="field-row">
-          <label class="field-label">Světlo (entita)</label>
+          <label class="field-label">Light (entity)</label>
           <ha-entity-picker data-r="${S(rid)}" data-f="light_entity" allow-custom-entity></ha-entity-picker>
         </div>
         <div class="field-row">
-          <label class="field-label">URL pozadí</label>
+          <label class="field-label">Background URL</label>
           <input class="field-input" type="text" data-r="${S(rid)}" data-f="image_url"
                  value="${S(room.image_url)}" placeholder="/local/Dashboards/Rooms/Bedroom.webp">
         </div>
         <div class="field-row">
-          <label class="field-label">URL overlay</label>
+          <label class="field-label">Overlay URL</label>
           <input class="field-input" type="text" data-r="${S(rid)}" data-f="overlay_image_url"
-                 value="${S(room.overlay_image_url)}" placeholder="/local/.../overlay.webp (volitelné)">
+                 value="${S(room.overlay_image_url)}" placeholder="/local/.../overlay.webp (optional)">
         </div>
 
-        <!-- Senzory -->
-        <div class="sub-title">Senzory</div>
+        <!-- Sensors -->
+        <div class="sub-title">Sensors</div>
         <div class="field-row">
-          <label class="field-label">Teplota</label>
+          <label class="field-label">Temperature</label>
           <ha-entity-picker data-r="${S(rid)}" data-f="temp_sensor" allow-custom-entity></ha-entity-picker>
         </div>
         <div class="field-row">
-          <label class="field-label">Vlhkost</label>
+          <label class="field-label">Humidity</label>
           <ha-entity-picker data-r="${S(rid)}" data-f="humidity_sensor" allow-custom-entity></ha-entity-picker>
         </div>
 
-        <!-- Filtry -->
-        <div class="sub-title">CSS filtry & přechody</div>
-        <div class="field-row">
-          <label class="field-label">Filter – noc/vypnuto</label>
-          <input class="field-input" type="text" data-r="${S(rid)}" data-f="filter_off"
-                 value="${S(room.filter_off)}" placeholder="brightness(0.6) saturate(1.0)">
+        <!-- Filters -->
+        <div class="sub-title">Image Filters & Transitions</div>
+        <div class="filter-panels">
+          ${this._renderFilterBlock(room, "filter_off",  "🌙 Night / Off")}
+          ${this._renderFilterBlock(room, "filter_on",   "💡 Light ON")}
+          ${this._renderFilterBlock(room, "filter_day",  "☀️ Day")}
         </div>
-        <div class="field-row">
-          <label class="field-label">Filter – světlo ON</label>
-          <input class="field-input" type="text" data-r="${S(rid)}" data-f="filter_on"
-                 value="${S(room.filter_on)}" placeholder="brightness(2.6) sepia(0.35) saturate(0.9)">
-        </div>
-        <div class="field-row">
-          <label class="field-label">Filter – den</label>
-          <input class="field-input" type="text" data-r="${S(rid)}" data-f="filter_day"
-                 value="${S(room.filter_day)}" placeholder="brightness(1.7) sepia(0.12) saturate(1.05)">
-        </div>
-        <div class="field-row">
-          <label class="field-label">Žaluzie (entita %)</label>
-          <ha-entity-picker data-r="${S(rid)}" data-f="blind_entity" allow-custom-entity></ha-entity-picker>
-        </div>
-        <div class="field-row">
-          <label class="field-label">Práh žaluzie</label>
-          <input class="field-input" type="number" min="0" max="100" data-r="${S(rid)}" data-f="blind_threshold"
-                 value="${S(room.blind_threshold ?? 36)}" title="Pod tuto % hodnotu = den (žaluzie otevřeny)">
-        </div>
-        <div class="field-row">
-          <label class="field-label">Přechod filtru</label>
-          <input class="field-input" type="text" data-r="${S(rid)}" data-f="transition_filter"
-                 value="${S(room.transition_filter ?? "1.5s")}" placeholder="1.5s">
-        </div>
-        <div class="field-row">
-          <label class="field-label">Přechod overlay</label>
-          <input class="field-input" type="text" data-r="${S(rid)}" data-f="transition_overlay"
-                 value="${S(room.transition_overlay ?? "2.0s")}" placeholder="2.0s">
+        <div class="transition-row">
+          <div class="field-row">
+            <label class="field-label">Filter transition</label>
+            <input class="field-input" type="text" data-r="${S(rid)}" data-f="transition_filter"
+                   value="${S(room.transition_filter ?? "1.5s")}" placeholder="1.5s">
+          </div>
+          <div class="field-row">
+            <label class="field-label">Overlay transition</label>
+            <input class="field-input" type="text" data-r="${S(rid)}" data-f="transition_overlay"
+                   value="${S(room.transition_overlay ?? "2.0s")}" placeholder="2.0s">
+          </div>
         </div>
 
-        <!-- Akce -->
-        <div class="sub-title">Akce</div>
-        ${this._renderActionBlock(room, "tap_action", "Kliknutí")}
-        ${this._renderActionBlock(room, "hold_action", "Přidržení (>500ms)")}
-        ${this._renderActionBlock(room, "double_tap_action", "Dvojklik")}
+        <!-- Actions -->
+        <div class="sub-title">Actions</div>
+        ${this._renderActionBlock(room, "tap_action",        "Tap")}
+        ${this._renderActionBlock(room, "hold_action",       "Hold (>500ms)")}
+        ${this._renderActionBlock(room, "double_tap_action", "Double tap")}
       </div>
     ` : "";
 
@@ -943,9 +979,62 @@ class RoomNavbarCardEditor extends HTMLElement {
           <span class="room-chevron ${open ? "open" : ""}">▶</span>
           <span class="room-title">${S(rid)}</span>
           ${room.light_entity ? `<span class="room-id-badge">${S(room.light_entity)}</span>` : ""}
-          <button class="btn-delete" data-delete-room="${S(rid)}" title="Smazat pokoj">🗑</button>
+          <button class="btn-delete" data-delete-room="${S(rid)}" title="Delete room">🗑</button>
         </div>
         ${body}
+      </div>`;
+  }
+
+  /**
+   * Render a graphical filter editor panel for filter_off / filter_on / filter_day.
+   * Uses sliders for brightness, saturation, sepia and hue-rotate.
+   */
+  _renderFilterBlock(room, filterKey, label) {
+    const S = (s) => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const rid = room.id;
+    const filterStr = room[filterKey] ?? "";
+    const { brightness, saturate, sepia, hueRotate } = parseFilter(filterStr);
+    const previewId = `${rid}-${filterKey}`;
+
+    return `
+      <div class="filter-block">
+        <div class="filter-title">${label}</div>
+        <div class="filter-preview-bar" data-preview="${S(previewId)}"
+             style="filter:${S(filterStr)}"></div>
+
+        <div class="filter-slider-row">
+          <span class="filter-prop" title="Brightness">☀</span>
+          <input type="range" class="filter-slider" min="0.10" max="3.00" step="0.05"
+                 data-r="${S(rid)}" data-fk="${filterKey}" data-fc="brightness"
+                 value="${brightness.toFixed(2)}">
+          <span class="filter-val" data-val="${S(previewId)}-brightness">${brightness.toFixed(2)}</span>
+        </div>
+
+        <div class="filter-slider-row">
+          <span class="filter-prop" title="Saturation">🎨</span>
+          <input type="range" class="filter-slider" min="0.00" max="4.00" step="0.05"
+                 data-r="${S(rid)}" data-fk="${filterKey}" data-fc="saturate"
+                 value="${saturate.toFixed(2)}">
+          <span class="filter-val" data-val="${S(previewId)}-saturate">${saturate.toFixed(2)}</span>
+        </div>
+
+        <div class="filter-slider-row">
+          <span class="filter-prop" title="Sepia">🟫</span>
+          <input type="range" class="filter-slider" min="0.00" max="1.00" step="0.05"
+                 data-r="${S(rid)}" data-fk="${filterKey}" data-fc="sepia"
+                 value="${sepia.toFixed(2)}">
+          <span class="filter-val" data-val="${S(previewId)}-sepia">${sepia.toFixed(2)}</span>
+        </div>
+
+        <div class="filter-slider-row">
+          <span class="filter-prop" title="Hue rotate">🌈</span>
+          <input type="range" class="filter-slider" min="-180" max="180" step="1"
+                 data-r="${S(rid)}" data-fk="${filterKey}" data-fc="hue"
+                 value="${Math.round(hueRotate)}">
+          <span class="filter-val" data-val="${S(previewId)}-hue">${Math.round(hueRotate)}°</span>
+        </div>
+
+        <div class="filter-raw" data-raw="${S(previewId)}">${S(filterStr) || "—"}</div>
       </div>`;
   }
 
@@ -963,21 +1052,21 @@ class RoomNavbarCardEditor extends HTMLElement {
     if (currentType === "navigate") {
       extra = `
         <div class="field-row" style="margin-top:6px">
-          <label class="field-label">Cesta</label>
+          <label class="field-label">Path</label>
           <input class="field-input" type="text" data-r="${S(rid)}" data-ak="${actionKey}" data-f="navigation_path"
                  value="${S(action?.navigation_path)}" placeholder="/dashboard-home/bedroom">
         </div>`;
     } else if (currentType === "more-info") {
       extra = `
         <div class="field-row" style="margin-top:6px">
-          <label class="field-label">Entita</label>
+          <label class="field-label">Entity</label>
           <ha-entity-picker data-r="${S(rid)}" data-ak="${actionKey}" data-f="entity" allow-custom-entity></ha-entity-picker>
         </div>`;
     } else if (currentType === "fire-dom-event" || currentType === "call-service") {
       const json = action ? JSON.stringify(action, null, 2) : "{}";
       extra = `
         <div style="margin-top:6px">
-          <label class="field-label" style="display:block;margin-bottom:4px">JSON akce</label>
+          <label class="field-label" style="display:block;margin-bottom:4px">Action JSON</label>
           <textarea class="field-input" rows="5" data-r="${S(rid)}" data-ak="${actionKey}" data-f="json"
                     placeholder='{"action":"fire-dom-event","browser_mod":{...}}'>${S(json)}</textarea>
         </div>`;
@@ -987,7 +1076,7 @@ class RoomNavbarCardEditor extends HTMLElement {
       <div class="action-block">
         <div class="action-label">${label}</div>
         <div class="field-row">
-          <label class="field-label">Typ akce</label>
+          <label class="field-label">Action type</label>
           <select class="field-input" data-r="${S(rid)}" data-action-type="${actionKey}">
             ${options}
           </select>
@@ -997,7 +1086,7 @@ class RoomNavbarCardEditor extends HTMLElement {
   }
 
   // ------------------------------------------------------------------
-  // DOM event listeners (voláno po každém _render)
+  // DOM event listeners (called after every _render)
   // ------------------------------------------------------------------
 
   _attachDomListeners() {
@@ -1014,7 +1103,7 @@ class RoomNavbarCardEditor extends HTMLElement {
       }
     });
 
-    // Select existující konfigurace
+    // Select existing configuration
     root.querySelector("#sel-existing")?.addEventListener("change", (e) => {
       const id = e.target.value;
       if (!id) return;
@@ -1024,7 +1113,7 @@ class RoomNavbarCardEditor extends HTMLElement {
       this._loadMenuConfig(id);
     });
 
-    // Název menu
+    // Menu name
     root.querySelector("#inp-menu-name")?.addEventListener("change", (e) => {
       this._ensureMenuConfig();
       this._menuConfig.name = e.target.value.trim();
@@ -1039,7 +1128,6 @@ class RoomNavbarCardEditor extends HTMLElement {
     // Room headers (toggle expand)
     root.querySelectorAll("[data-toggle]").forEach(el => {
       el.addEventListener("click", (e) => {
-        // Neklikli jsme na delete button?
         if (e.target.closest("[data-delete-room]")) return;
         this._toggleExpand(el.dataset.toggle);
       });
@@ -1049,102 +1137,11 @@ class RoomNavbarCardEditor extends HTMLElement {
     root.querySelectorAll("[data-delete-room]").forEach(el => {
       el.addEventListener("click", (e) => {
         e.stopPropagation();
-        if (confirm(`Smazat pokoj "${el.dataset.deleteRoom}"?`)) {
+        if (confirm(`Delete room "${el.dataset.deleteRoom}"?`)) {
           this._deleteRoom(el.dataset.deleteRoom);
         }
       });
     });
 
-    // Textová pole pokojů – update bez re-renderu
-    root.querySelectorAll("input[data-r][data-f], textarea[data-r][data-f]").forEach(el => {
-      el.addEventListener("change", (e) => {
-        const { r, f, ak } = e.target.dataset;
-        if (ak) {
-          // Pole patřící akci (navigation_path, json)
-          const room = this._menuConfig?.rooms.find(rm => rm.id === r);
-          if (!room) return;
-          if (f === "json") {
-            try { room[ak] = JSON.parse(e.target.value); } catch { /* nevalidní JSON, ignorujeme */ }
-          } else {
-            room[ak] = { ...(room[ak] ?? {}), [f]: e.target.value };
-          }
-        } else {
-          // ID místnosti – speciální případ (musíme aktualizovat expanded set)
-          if (f === "id") {
-            const old = r;
-            const newId = e.target.value.trim();
-            const room = this._menuConfig?.rooms.find(rm => rm.id === old);
-            if (room && newId && newId !== old) {
-              room.id = newId;
-              if (this._expanded.has(old)) { this._expanded.delete(old); this._expanded.add(newId); }
-              this._render();
-              return;
-            }
-          }
-          this._setField(r, f, f === "blind_threshold" ? Number(e.target.value) : e.target.value);
-        }
-      });
-    });
-
-    // Action type selecty
-    root.querySelectorAll("[data-action-type]").forEach(el => {
-      el.addEventListener("change", (e) => {
-        this._setActionType(e.target.dataset.r, e.target.dataset.actionType, e.target.value);
-      });
-    });
-
-    // Entity pickery – základní pole pokoje
-    root.querySelectorAll("ha-entity-picker[data-r][data-f]").forEach(picker => {
-      if (this._hass) picker.hass = this._hass;
-      const { r, f, ak } = picker.dataset;
-      // Nastavíme aktuální hodnotu
-      const room = this._menuConfig?.rooms.find(rm => rm.id === r);
-      if (room) {
-        picker.value = ak ? (room[ak]?.[f] ?? "") : (room[f] ?? "");
-      }
-      picker.addEventListener("value-changed", (e) => {
-        const val = e.detail.value;
-        if (ak) {
-          const rm = this._menuConfig?.rooms.find(rm => rm.id === r);
-          if (rm) rm[ak] = { ...(rm[ak] ?? {}), [f]: val };
-        } else {
-          this._setField(r, f, val);
-        }
-      });
-    });
-  }
-
-  // ------------------------------------------------------------------
-  // HA config-changed event
-  // ------------------------------------------------------------------
-
-  _emitConfigChanged(partialConfig) {
-    const merged = { ...this._cardConfig, ...partialConfig };
-    // Odstraníme undefined / null
-    const clean = Object.fromEntries(Object.entries(merged).filter(([, v]) => v != null));
-    fireEvent(this, "config-changed", { config: clean });
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Registrace
-// ---------------------------------------------------------------------------
-
-customElements.define(CARD_TAG, RoomNavbarCard);
-customElements.define(EDITOR_TAG, RoomNavbarCardEditor);
-
-// Registrace v HA card picku
-window.customCards = window.customCards ?? [];
-window.customCards.push({
-  type: CARD_TAG,
-  name: "Room Navbar Card",
-  description: "Sdílené navigační menu s výkonovými optimalizacemi. Sdílí se přes dashboardy pomocí config_id.",
-  preview: true,
-  documentationURL: "https://github.com/michals-home/room-navbar-card",
-});
-
-console.info(
-  `%c ROOM-NAVBAR-CARD %c v${VERSION} `,
-  "color:#fff;background:#1a73e8;font-weight:bold;padding:2px 4px;border-radius:3px 0 0 3px",
-  "color:#1a73e8;background:#e8f0fe;font-weight:bold;padding:2px 4px;border-radius:0 3px 3px 0"
-);
+    // Text / number fields – update without re-render
+    root.querySelectorAll("input[data-r][data-f], textarea[data-r][data-f]"
