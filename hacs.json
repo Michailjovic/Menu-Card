@@ -1,4 +1,6 @@
 {
   "name": "Room Navbar Card",
-  "render_readme": true
+  "render_readme": true,
+  "filename": "room-navbar-card.js",
+  "content_in_root": true
 }
