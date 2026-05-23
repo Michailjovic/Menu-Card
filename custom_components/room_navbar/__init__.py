@@ -1,4 +1,4 @@
-"""Room Navbar Card – Home Assistant integrace."""
+"""Room Navbar Card - Home Assistant integrace."""
 from __future__ import annotations
 
 import json
@@ -21,29 +21,22 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor"]
 
-# URL pod kterou integrace servuje JS soubor přes vlastní statický endpoint
 _CARD_URL = "/room_navbar_card/room-navbar-card.js"
 
-# Verze z manifestu – pro cache-busting (?v=X.X.X v Lovelace resource URL)
 _MANIFEST_PATH = Path(__file__).parent / "manifest.json"
 with open(_MANIFEST_PATH, encoding="utf-8") as _f:
     _INTEGRATION_VERSION: str = json.load(_f).get("version", "0.0.0")
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Globální setup – zaregistruje statický HTTP endpoint pro JS kartu.
-
-    Volá se při každém startu HA, PŘED nastavením config entries.
-    Registrace Lovelace resource probíhá zde (jednou za integraci,
-    ne jednou za config entry).
-    """
+    """Globalni setup - registruje staticku HTTP cestu pro JS kartu."""
     hass.data.setdefault(DOMAIN, {})
 
     js_path = Path(__file__).parent / "www" / "room-navbar-card.js"
 
     if not js_path.exists():
         _LOGGER.error(
-            "Room Navbar: JS soubor nenalezen: %s – reinstaluj integraci přes HACS.",
+            "Room Navbar: JS soubor nenalezen: %s - reinstaluj integraci pres HACS.",
             js_path,
         )
         return True
@@ -52,11 +45,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         await hass.http.async_register_static_paths([
             StaticPathConfig(_CARD_URL, str(js_path), cache_headers=True)
         ])
-        _LOGGER.info("Room Navbar: JS dostupný na %s", _CARD_URL)
+        _LOGGER.info("Room Navbar: JS dostupny na %s", _CARD_URL)
     except Exception:  # noqa: BLE001
-        _LOGGER.exception("Room Navbar: chyba při registraci statické cesty")
+        _LOGGER.exception("Room Navbar: chyba pri registraci staticke cesty")
 
-    # Registrace Lovelace resource – až po plném startu HA
     async def _handle_started(_event: Event | None = None) -> None:
         await _async_register_lovelace_resource(hass, _CARD_URL, _INTEGRATION_VERSION)
 
@@ -69,22 +61,19 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Nastaví Room Navbar po přidání integrace."""
+    """Nastavi Room Navbar po pridani integrace."""
     hass.data.setdefault(DOMAIN, {})
 
-    # Storage
     store = RoomNavbarStore(hass)
     await store.async_load()
     hass.data[DOMAIN]["store"] = store
 
-    # WebSocket API
     async_register_websocket_commands(hass)
 
-    # Sensor platforma
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     _LOGGER.info(
-        "Room Navbar: integrace aktivní, %d konfigurací načteno",
+        "Room Navbar: integrace aktivni, %d konfiguraci nacteno",
         len(store.get_configs()),
     )
     return True
@@ -93,58 +82,60 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_register_lovelace_resource(
     hass: HomeAssistant, url: str, version: str
 ) -> None:
-    """Přidá/aktualizuje JS kartu v Lovelace resources (storage mód).
+    """Prida nebo aktualizuje JS kartu v Lovelace resources.
 
-    Importujeme LOVELACE_DATA a MODE_STORAGE až zde (uvnitř funkce),
-    aby import neselhal pokud by lovelace komponenta nebyla ještě inicializovaná.
-
-    Workaround pro HA bug #165767: async_create_item() / async_items() nemají
-    lazy-load guard → MUSÍME explicitně volat await resources.async_load()
-    před jakoukoliv operací, jinak hrozí přepsání celého storage souboru.
+    Klic hass.data["lovelace"] je potvrzeny string - viz browser_mod, KipK guide.
+    Dual-fallback pro atribut modu: starsi HA pouziva 'mode', novejsi 'resource_mode'.
+    Explicitni async_load() pred kazdou operaci - workaround pro HA bug #165767.
     """
-    try:
-        # Import uvnitř funkce – lovelace je zaručeně načteno až po
-        # EVENT_HOMEASSISTANT_STARTED, takže import je v tuto chvíli bezpečný
-        from homeassistant.components.lovelace import LOVELACE_DATA  # noqa: PLC0415
-        from homeassistant.components.lovelace.const import MODE_STORAGE  # noqa: PLC0415
-    except ImportError:
-        _LOGGER.warning(
-            "Room Navbar: Nepodařilo se importovat lovelace konstanty. "
-            "Přidej resource ručně: '%s?v=%s' (JavaScript module).",
-            url, version,
-        )
-        return
+    # "lovelace" je hardcoded string klic - potvrzeno v HA zdrojovem kodu a
+    # fungujicich integracich (browser_mod, marees_france, atd.)
+    lovelace_data = hass.data.get("lovelace")
 
-    lovelace_data = hass.data.get(LOVELACE_DATA)
     if lovelace_data is None:
-        _LOGGER.debug(
-            "Room Navbar: hass.data[LOVELACE_DATA] není dostupné "
-            "(LOVELACE_DATA=%r). Zkouším znovu za 10 s.",
-            LOVELACE_DATA,
+        _LOGGER.warning(
+            "Room Navbar: hass.data['lovelace'] neni dostupne. "
+            "Zkousim znovu za 10 s. Dostupne klice v hass.data: %s",
+            [k for k in hass.data if isinstance(k, str)],
         )
-        async def _retry_no_data(_now: Any) -> None:
+
+        async def _retry(_now: Any) -> None:
             await _async_register_lovelace_resource(hass, url, version)
-        async_call_later(hass, 10, _retry_no_data)
+
+        async_call_later(hass, 10, _retry)
         return
 
-    # LovelaceData dataclass má 'resource_mode', NE 'mode'
-    resource_mode = getattr(lovelace_data, "resource_mode", None)
-    if resource_mode != MODE_STORAGE:
-        _LOGGER.debug(
-            "Room Navbar: Lovelace resources jsou v '%s' módu (ne storage) – "
-            "resource přidej ručně do ui-lovelace.yaml",
-            resource_mode,
+    # Dual-fallback: HA 2026+ pouziva 'resource_mode', starsi 'mode'
+    resource_mode = getattr(
+        lovelace_data,
+        "resource_mode",
+        getattr(lovelace_data, "mode", "unknown"),
+    )
+
+    _LOGGER.debug("Room Navbar: lovelace resource_mode = %r", resource_mode)
+
+    if resource_mode != "storage":
+        _LOGGER.warning(
+            "Room Navbar: Lovelace resources jsou v '%s' modu (ne storage). "
+            "Resource prida rucne: Nastaveni -> Dashboardy -> Resources -> "
+            "'%s?v=%s' jako JavaScript module.",
+            resource_mode, url, version,
         )
         return
 
     resources = getattr(lovelace_data, "resources", None)
     if resources is None:
-        _LOGGER.debug("Room Navbar: lovelace_data.resources je None")
+        _LOGGER.warning(
+            "Room Navbar: lovelace_data.resources je None. "
+            "Typ lovelace_data: %s, atributy: %s",
+            type(lovelace_data).__name__,
+            [a for a in dir(lovelace_data) if not a.startswith("_")],
+        )
         return
 
-    # KRITICKÉ: explicitní async_load() před jakoukoliv operací.
-    # Workaround pro HA bug #165767 – async_items() a async_create_item()
-    # nemají lazy-load guard; bez tohoto volání hrozí přepsání storage souboru.
+    # Workaround pro HA bug #165767: async_items() a async_create_item()
+    # nemaji lazy-load guard. Explicitni async_load() zajisti ze data jsou
+    # v pameti pred jakoukoli operaci.
     await resources.async_load()
 
     versioned_url = f"{url}?v={version}"
@@ -163,17 +154,16 @@ async def _async_register_lovelace_resource(
         )
         if current_version == version:
             _LOGGER.debug(
-                "Room Navbar: resource '%s' je aktuální (v%s)", url, version
+                "Room Navbar: resource '%s' je aktualni (v%s)", url, version
             )
             return
-        # Aktualizuj URL na novou verzi
         await resources.async_update_item(
             resource["id"],
             {"res_type": "module", "url": versioned_url},
         )
         _LOGGER.info(
-            "Room Navbar: Lovelace resource aktualizován na v%s: %s "
-            "– proveď Ctrl+Shift+R v prohlížeči.",
+            "Room Navbar: Lovelace resource aktualizovan na v%s: %s "
+            "- proved Ctrl+Shift+R v prohlizeci.",
             version, versioned_url,
         )
     else:
@@ -181,14 +171,14 @@ async def _async_register_lovelace_resource(
             {"res_type": "module", "url": versioned_url}
         )
         _LOGGER.info(
-            "Room Navbar: Lovelace resource automaticky přidán: %s "
-            "– proveď Ctrl+Shift+R v prohlížeči.",
+            "Room Navbar: Lovelace resource automaticky pridan: %s "
+            "- proved Ctrl+Shift+R v prohlizeci.",
             versioned_url,
         )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Odstraní integraci."""
+    """Odstrani integraci."""
     listener = hass.data[DOMAIN].pop("store_listener", None)
     if listener:
         store = hass.data[DOMAIN].get("store")
