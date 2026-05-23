@@ -1,5 +1,5 @@
 /**
- * room-navbar-card  v0.0.10
+ * room-navbar-card  v0.0.11
  *
  * Performance-optimized shared navigation menu for HA dashboards.
  *
@@ -15,7 +15,7 @@
  *   Falls back to local JS computation if sensor doesn't exist.
  */
 
-const VERSION = "0.0.10";
+const VERSION = "0.0.11";
 const CARD_TAG = "room-navbar-card";
 const EDITOR_TAG = "room-navbar-card-editor";
 const SENSOR_PREFIX = "rnc";
@@ -458,7 +458,9 @@ class RoomNavbarCard extends HTMLElement {
   _computeFilter(room) {
     // Prefer pre-computed sensor from Python backend
     if (this._cardConfig?.config_id) {
-      const sensorId = `sensor.${SENSOR_PREFIX}_${this._cardConfig.config_id}_${room.id}_filter`;
+      const configSlug = this._cardConfig.config_id.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+      const roomSlug   = room.id.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+      const sensorId = `sensor.${SENSOR_PREFIX}_${configSlug}_${roomSlug}_filter`;
       const s = this._hass?.states[sensorId];
       if (s && s.state !== "unavailable" && s.state !== "unknown" && s.state) {
         return s.state;

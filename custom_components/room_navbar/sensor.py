@@ -319,5 +319,11 @@ class RoomFilterSensor(SensorEntity):
 # ---------------------------------------------------------------------------
 
 def _sensor_entity_id(config_id: str, room_id: str) -> str:
-    """Vrátí deterministické entity_id pro filter sensor."""
-    return f"sensor.{SENSOR_PREFIX}_{config_id}_{room_id}_filter"
+    """Vrátí deterministické entity_id pro filter sensor.
+
+    HA entity ID musí být lowercase a nesmí obsahovat mezery ani speciální znaky.
+    """
+    import re
+    safe_config = re.sub(r"[^a-z0-9_]", "_", config_id.lower())
+    safe_room   = re.sub(r"[^a-z0-9_]", "_", room_id.lower())
+    return f"sensor.{SENSOR_PREFIX}_{safe_config}_{safe_room}_filter"
