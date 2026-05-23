@@ -564,9 +564,17 @@ class RoomNavbarCardEditor extends HTMLElement {
       this._availConfigs = [];
       this._backendOk = false;
     }
-    // Pokud máme config_id ale menuConfig ještě není, načteme
+    // Pokud máme config_id ale menuConfig ještě není, načteme z backendu
     if (this._cardConfig.config_id && !this._menuConfig) {
       await this._loadMenuConfig(this._cardConfig.config_id);
+    } else if (!this._menuConfig) {
+      // Inline mód (rooms přímo v YAML, bez config_id) – inicializujeme z nich.
+      // Taky sem dopadne zcela nová karta bez ničeho.
+      this._menuConfig = {
+        name: "",
+        rooms: this._cardConfig.rooms ? [...this._cardConfig.rooms] : [],
+      };
+      this._render();
     } else {
       this._render();
     }
