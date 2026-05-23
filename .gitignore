@@ -1,0 +1,14 @@
+# Node / build
+node_modules/
+package-lock.json
+
+# Rollup cache
+.rollup.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.swp
