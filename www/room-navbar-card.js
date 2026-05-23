@@ -1154,23 +1154,27 @@ class RoomNavbarCardEditor extends HTMLElement {
           if (f === "json") {
             try { room[ak] = JSON.parse(e.target.value); } catch { /* invalid JSON, ignore */ }
           } else {
-            room[ak] = { ...(room[ak] ?? {}), [f]: e.target.value };
+            if (!room[ak] || typeof room[ak] !== "object") room[ak] = {};
+            room[ak][f] = e.target.value.trim();
           }
         } else {
-          // Room ID – special case (must update expanded set)
-          if (f === "id") {
-            const old = r;
-            const newId = e.target.value.trim();
-            const room = this._menuConfig?.rooms.find(rm => rm.id === old);
-            if (room && newId && newId !== old) {
-              room.id = newId;
-              if (this._expanded.has(old)) { this._expanded.delete(old); this._expanded.add(newId); }
-              this._render();
-              return;
-            }
-          }
-          this._setField(r, f, e.target.value);
+          const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+          if (!room) return;
+          room[f] = e.target.value.trim();
         }
+      });
+    });
+
+    // Action type selects
+    root.querySelectorAll("select[data-r][data-ak]").forEach(el => {
+      el.addEventListener("change", (e) => {
+        const { r, ak } = e.target.dataset;
+        const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+        if (!room) return;
+        if (!room[ak] || typeof room[ak] !== "object") room[ak] = {};
+        room[ak].action = e.target.value;
+        this._renderEditorContent();
+        this._attachDomListeners();
       });
     });
 
@@ -1180,73 +1184,26 @@ class RoomNavbarCardEditor extends HTMLElement {
         const { r, fk, fc } = slider.dataset;
         const room = this._menuConfig?.rooms.find(rm => rm.id === r);
         if (!room) return;
-
-        // Collect all four slider values for this filter panel
         const get = (comp) =>
           parseFloat(root.querySelector(`input[data-r="${r}"][data-fk="${fk}"][data-fc="${comp}"]`)?.value ?? 0);
-
         const brightness = get("brightness");
         const saturate   = get("saturate");
         const sepia      = get("sepia");
         const hueRotate  = get("hue");
-
         const newFilter = buildFilter({ brightness, saturate, sepia, hueRotate });
         room[fk] = newFilter;
-
-        // Update value label for the changed slider
         const previewId = `${r}-${fk}`;
         const valEl = root.querySelector(`[data-val="${previewId}-${fc}"]`);
         if (valEl) {
           const v = parseFloat(slider.value);
           valEl.textContent = fc === "hue" ? `${Math.round(v)}°` : v.toFixed(2);
         }
-
-        // Update preview bar and raw string
         const preview = root.querySelector(`[data-preview="${previewId}"]`);
         if (preview) preview.style.filter = newFilter;
-
         const rawEl = root.querySelector(`[data-raw="${previewId}"]`);
         if (rawEl) rawEl.textContent = newFilter;
       });
     });
-
-    // Action type selects
-    root.querySelectorAll("[data-action-type]").forEach(el => {
-      el.addEventListener("change", (e) => {
-        this._setActionType(e.target.dataset.r, e.target.dataset.actionType, e.target.value);
-      });
-    });
-
-    // Entity pickers – basic room fields
-    root.querySelectorAll("ha-entity-picker[data-r][data-f]").forEach(picker => {
-      if (this._hass) picker.hass = this._hass;
-      const { r, f, ak } = picker.dataset;
-
-      // Set current value
-      const room = this._menuConfig?.rooms.find(rm => rm.id === r);
-      if (room) {
-        picker.value = ak ? (room[ak]?.[f] ?? "") : (room[f] ?? "");
-      }
-      picker.addEventListener("value-changed", (e) => {
-        const val = e.detail.value;
-        if (ak) {
-          const rm = this._menuConfig?.rooms.find(rm => rm.id === r);
-          if (rm) rm[ak] = { ...(rm[ak] ?? {}), [f]: val };
-        } else {
-          this._setField(r, f, val);
-        }
-      });
-    });
-  }
-
-  // ------------------------------------------------------------------
-  // HA config-changed event
-  // ------------------------------------------------------------------
-
-  _emitConfigChanged(partialConfig) {
-    const merged = { ...this._cardConfig, ...partialConfig };
-    const clean = Object.fromEntries(Object.entries(merged).filter(([, v]) => v != null));
-    fireEvent(this, "config-changed", { config: clean });
   }
 }
 
@@ -1254,21 +1211,21 @@ class RoomNavbarCardEditor extends HTMLElement {
 // Registration
 // ---------------------------------------------------------------------------
 
-customElements.define(CARD_TAG, RoomNavbarCard);
-customElements.define(EDITOR_TAG, RoomNavbarCardEditor);
+if (!customElements.get(CARD_TAG)) {
+  customElements.define(CARD_TAG, RoomNavbarCard);
+  console.info(`%c room-navbar-card %c v${VERSION} `, "background:#1976d2;color:#fff;font-weight:700", "background:#333;color:#fff");
+}
 
-// Register in HA card picker
-window.customCards = window.customCards ?? [];
-window.customCards.push({
-  type: CARD_TAG,
-  name: "Room Navbar Card",
-  description: "Shared navigation menu with performance optimizations. Shared across dashboards via config_id.",
-  preview: true,
-  documentationURL: "https://github.com/michals-home/room-navbar-card",
-});
+if (!customElements.get(EDITOR_TAG)) {
+  customElements.define(EDITOR_TAG, RoomNavbarCardEditor);
+}
 
-console.info(
-  `%c ROOM-NAVBAR-CARD %c v${VERSION} `,
-  "color:#fff;background:#1a73e8;font-weight:bold;padding:2px 4px;border-radius:3px 0 0 3px",
-  "color:#1a73e8;background:#e8f0fe;font-weight:bold;padding:2px 4px;border-radius:0 3px 3px 0"
-);
+window.customCards = window.customCards || [];
+if (!window.customCards.find(c => c.type === CARD_TAG)) {
+  window.customCards.push({
+    type: CARD_TAG,
+    name: "Room Navbar Card",
+    description: "Shared navigation bar with per-room images, filters, temperature and humidity.",
+    preview: true,
+  });
+}

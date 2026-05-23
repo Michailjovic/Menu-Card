@@ -1144,4 +1144,88 @@ class RoomNavbarCardEditor extends HTMLElement {
     });
 
     // Text / number fields – update without re-render
-    root.querySelectorAll("input[data-r][data-f], textarea[data-r][data-f]"
+    root.querySelectorAll("input[data-r][data-f], textarea[data-r][data-f]").forEach(el => {
+      el.addEventListener("change", (e) => {
+        const { r, f, ak } = e.target.dataset;
+        if (ak) {
+          // Field belonging to an action (navigation_path, json)
+          const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+          if (!room) return;
+          if (f === "json") {
+            try { room[ak] = JSON.parse(e.target.value); } catch { /* invalid JSON, ignore */ }
+          } else {
+            if (!room[ak] || typeof room[ak] !== "object") room[ak] = {};
+            room[ak][f] = e.target.value.trim();
+          }
+        } else {
+          const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+          if (!room) return;
+          room[f] = e.target.value.trim();
+        }
+      });
+    });
+
+    // Action type selects
+    root.querySelectorAll("select[data-r][data-ak]").forEach(el => {
+      el.addEventListener("change", (e) => {
+        const { r, ak } = e.target.dataset;
+        const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+        if (!room) return;
+        if (!room[ak] || typeof room[ak] !== "object") room[ak] = {};
+        room[ak].action = e.target.value;
+        this._renderEditorContent();
+        this._attachDomListeners();
+      });
+    });
+
+    // Filter sliders – live update without re-render
+    root.querySelectorAll("input[data-fk][data-fc]").forEach(slider => {
+      slider.addEventListener("input", () => {
+        const { r, fk, fc } = slider.dataset;
+        const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+        if (!room) return;
+        const get = (comp) =>
+          parseFloat(root.querySelector(`input[data-r="${r}"][data-fk="${fk}"][data-fc="${comp}"]`)?.value ?? 0);
+        const brightness = get("brightness");
+        const saturate   = get("saturate");
+        const sepia      = get("sepia");
+        const hueRotate  = get("hue");
+        const newFilter = buildFilter({ brightness, saturate, sepia, hueRotate });
+        room[fk] = newFilter;
+        const previewId = `${r}-${fk}`;
+        const valEl = root.querySelector(`[data-val="${previewId}-${fc}"]`);
+        if (valEl) {
+          const v = parseFloat(slider.value);
+          valEl.textContent = fc === "hue" ? `${Math.round(v)}°` : v.toFixed(2);
+        }
+        const preview = root.querySelector(`[data-preview="${previewId}"]`);
+        if (preview) preview.style.filter = newFilter;
+        const rawEl = root.querySelector(`[data-raw="${previewId}"]`);
+        if (rawEl) rawEl.textContent = newFilter;
+      });
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Registration
+// ---------------------------------------------------------------------------
+
+if (!customElements.get(CARD_TAG)) {
+  customElements.define(CARD_TAG, RoomNavbarCard);
+  console.info(`%c room-navbar-card %c v${VERSION} `, "background:#1976d2;color:#fff;font-weight:700", "background:#333;color:#fff");
+}
+
+if (!customElements.get(EDITOR_TAG)) {
+  customElements.define(EDITOR_TAG, RoomNavbarCardEditor);
+}
+
+window.customCards = window.customCards || [];
+if (!window.customCards.find(c => c.type === CARD_TAG)) {
+  window.customCards.push({
+    type: CARD_TAG,
+    name: "Room Navbar Card",
+    description: "Shared navigation bar with per-room images, filters, temperature and humidity.",
+    preview: true,
+  });
+}
