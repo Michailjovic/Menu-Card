@@ -1,0 +1,114 @@
+      .rnc-btn-add {
+        padding: 6px 12px;
+        background: rgba(255,255,255,0.07);
+        color: var(--primary-text-color);
+        border: 1px solid var(--divider-color, rgba(255,255,255,0.12));
+        border-radius: 6px; font-size: 12px; cursor: pointer;
+      }
+      .rnc-btn-add:hover { background: rgba(255,255,255,0.12); }
+
+      .rnc-empty {
+        font-size: 13px; color: var(--secondary-text-color);
+        padding: 20px; text-align: center;
+        border: 1px dashed var(--divider-color, rgba(255,255,255,0.15));
+        border-radius: 8px; margin-bottom: 8px;
+      }
+
+      .rnc-room-card {
+        border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
+        border-radius: 10px; margin-bottom: 8px; overflow: hidden;
+      }
+      .rnc-room-header {
+        display: flex; align-items: center; gap: 8px;
+        padding: 10px 14px; cursor: pointer; user-select: none;
+        background: rgba(255,255,255,0.04);
+      }
+      .rnc-room-header:hover { background: rgba(255,255,255,0.07); }
+      .rnc-chevron {
+        font-size: 10px; color: var(--secondary-text-color);
+        transition: transform .2s; flex-shrink: 0;
+      }
+      .rnc-chevron.open { transform: rotate(90deg); }
+      .rnc-room-name { flex: 1; font-size: 13px; font-weight: 500; }
+      .rnc-btn-delete {
+        background: none; border: none; cursor: pointer;
+        font-size: 14px; color: var(--error-color, #cf6679); padding: 4px;
+      }
+
+      .rnc-body { padding: 14px; }
+
+      .rnc-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+      .rnc-lbl { flex: 0 0 140px; font-size: 12px; color: var(--secondary-text-color); }
+      .rnc-hint { font-size: 10px; opacity: .7; font-style: italic; }
+      .rnc-inp {
+        flex: 1; padding: 7px 10px;
+        background: var(--input-fill-color, rgba(255,255,255,0.06));
+        color: var(--primary-text-color);
+        border: 1px solid var(--divider-color, rgba(255,255,255,0.12));
+        border-radius: 6px; font-size: 13px;
+      }
+      .rnc-inp:focus { outline: none; border-color: var(--primary-color); }
+
+      .rnc-sub {
+        font-size: 11px; font-weight: 600; text-transform: uppercase;
+        letter-spacing: .4px; color: var(--secondary-text-color);
+        margin: 14px 0 6px; padding-top: 10px;
+        border-top: 1px solid var(--divider-color, rgba(255,255,255,0.08));
+      }
+
+      .rnc-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+      .rnc-filter-block {
+        flex: 1; min-width: 140px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 8px; padding: 10px 12px;
+      }
+      .rnc-filter-title {
+        font-size: 10px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: .5px; color: var(--secondary-text-color); margin-bottom: 8px;
+      }
+      .rnc-preview {
+        width: 100%; height: 30px; border-radius: 4px; margin-bottom: 10px;
+        background: linear-gradient(135deg,
+          #0d1b2a 0%, #1b3a5c 20%, #2e6da4 40%, #e8a045 60%, #f5d76e 80%, #fff 100%);
+      }
+      .rnc-slider-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+      .rnc-icon  { flex: 0 0 20px; font-size: 12px; text-align: center; }
+      .rnc-slider { flex: 1; height: 4px; cursor: pointer; accent-color: var(--primary-color); }
+      .rnc-val {
+        flex: 0 0 36px; font-size: 10px; text-align: right;
+        color: var(--primary-text-color); font-family: monospace;
+      }
+      .rnc-raw {
+        font-size: 9px; color: var(--secondary-text-color); font-family: monospace;
+        margin-top: 6px; word-break: break-all; line-height: 1.4;
+        padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);
+      }
+    </style>`;
+  }
+}
+
+// ── Registration ──────────────────────────────────────────────────────────────
+
+if (!customElements.get(CARD_TAG)) {
+  customElements.define(CARD_TAG, RoomNavbarCard);
+  console.info(
+    `%c room-navbar-card %c v${VERSION} `,
+    'background:#1976d2;color:#fff;font-weight:700',
+    'background:#333;color:#fff',
+  );
+}
+
+if (!customElements.get(EDITOR_TAG)) {
+  customElements.define(EDITOR_TAG, RoomNavbarCardEditor);
+}
+
+window.customCards = window.customCards || [];
+if (!window.customCards.find(c => c.type === CARD_TAG)) {
+  window.customCards.push({
+    type:        CARD_TAG,
+    name:        'Room Navbar Card',
+    description: 'Scrollable navigation bar with per-room images, filters, temperature and humidity.',
+    preview:     true,
+  });
+}

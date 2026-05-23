@@ -1,15 +1,20 @@
 /**
- * room-navbar-card  v0.1.0
+ * room-navbar-card  v0.1.1
  *
  * Pure Lovelace card – no Python backend, config stored in card YAML.
  *
  * RoomNavbarCard       – display card  (LitElement, shadow DOM)
  * RoomNavbarCardEditor – GUI editor    (LitElement, light DOM + ha-form)
+ *
+ * Gesture support:
+ *   tap            → tap_action
+ *   double-tap     → double_tap_action
+ *   hold (500 ms)  → hold_action
  */
 
 import { LitElement, html, css, nothing } from 'lit';
 
-const VERSION    = '0.1.0';
+const VERSION    = '0.1.1';
 const CARD_TAG   = 'room-navbar-card';
 const EDITOR_TAG = 'room-navbar-card-editor';
 
@@ -31,13 +36,13 @@ function navigate(path) {
 
 function tempColor(v) {
   const n = parseFloat(v);
-  if (isNaN(n)) return 'rgba(255,255,255,0.7)';
+  if (isNaN(n)) return 'rgba(255,255,255,0.85)';
   return n > 25 ? '#ff4d4f' : n < 18 ? '#40a9ff' : '#52c41a';
 }
 
 function humColor(v) {
   const n = parseFloat(v);
-  if (isNaN(n)) return 'rgba(255,255,255,0.7)';
+  if (isNaN(n)) return 'rgba(255,255,255,0.85)';
   return n >= 60 ? '#ff4d4f' : n >= 55 ? '#faad14' : '#52c41a';
 }
 
@@ -76,6 +81,7 @@ class RoomNavbarCard extends LitElement {
 
   static styles = css`
     :host { display: block; }
+
     .navbar {
       display: flex;
       gap: 6px;
@@ -96,6 +102,7 @@ class RoomNavbarCard extends LitElement {
       -webkit-tap-highlight-color: transparent;
       user-select: none;
     }
+
     .room-bg {
       position: absolute;
       inset: 0;
@@ -104,39 +111,75 @@ class RoomNavbarCard extends LitElement {
       transition-property: filter;
       transition-timing-function: ease;
     }
+
     .room-overlay {
       position: absolute;
       inset: 0;
       background-size: cover;
       background-position: center;
     }
-    .room-info {
+
+    /* Gradient overlay – bottom fade for label readability */
+    .room-gradient {
       position: absolute;
       inset: 0;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      padding: 5px 6px;
-      background: linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 60%);
+      background: linear-gradient(
+        to bottom,
+        transparent 40%,
+        rgba(0,0,0,0.55) 100%
+      );
+      pointer-events: none;
     }
-    .room-sensors {
-      display: flex;
-      gap: 4px;
+
+    /* Temperature – top-left corner */
+    .sensor-temp {
+      position: absolute;
+      top: 6px;
+      left: 7px;
       font-size: 10px;
-      font-weight: 700;
+      font-weight: 800;
       line-height: 1;
-      margin-bottom: 2px;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+      pointer-events: none;
     }
+
+    /* Humidity – bottom-left corner */
+    .sensor-hum {
+      position: absolute;
+      bottom: 6px;
+      left: 7px;
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+      pointer-events: none;
+    }
+
+    /* Room label – bottom-right corner */
     .room-label {
-      font-size: 11px;
+      position: absolute;
+      bottom: 6px;
+      right: 6px;
+      font-size: 10px;
       font-weight: 600;
       color: #fff;
-      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+      text-shadow: 0 1px 3px rgba(0,0,0,0.9);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      max-width: 70%;
+      text-align: right;
+      pointer-events: none;
     }
   `;
+
+  constructor() {
+    super();
+    // Gesture state (per room-id)
+    this._holdTimers = new Map(); // roomId → timer
+    this._held       = new Set(); // rooms where hold just fired
+    this._clicks     = new Map(); // roomId → { count, timer }
+  }
 
   setConfig(config) {
     if (!config.rooms) throw new Error('room-navbar-card: "rooms" is required');
@@ -150,41 +193,96 @@ class RoomNavbarCard extends LitElement {
   static getStubConfig() {
     return {
       rooms: [{
-        id: 'bedroom',
-        image_url: '/local/Dashboards/Rooms/Bedroom.webp',
-        light_entity: '',
-        temp_sensor: '',
-        humidity_sensor: '',
-        filter_off: DEFAULT_OFF,
-        filter_on: DEFAULT_ON,
-        transition_filter: '1.5s',
-        tap_action: { action: 'navigate', navigation_path: '/lovelace/0' },
+        id:               'bedroom',
+        label:            'Bedroom',
+        image_url:        '/local/Dashboards/Rooms/Bedroom.webp',
+        light_entity:     '',
+        temp_sensor:      '',
+        humidity_sensor:  '',
+        filter_off:       DEFAULT_OFF,
+        filter_on:        DEFAULT_ON,
+        transition_filter:'1.5s',
+        tap_action:        { action: 'navigate', navigation_path: '/lovelace/0' },
+        double_tap_action: { action: 'none' },
+        hold_action:       { action: 'none' },
       }],
     };
   }
 
-  _computeFilter(room) {
-    if (!this.hass) return room.filter_off ?? DEFAULT_OFF;
-    const ls = room.light_entity ? this.hass.states[room.light_entity] : null;
-    if (ls?.state === 'on') return room.filter_on ?? DEFAULT_ON;
-    return room.filter_off ?? DEFAULT_OFF;
+  // ── Gesture handlers ─────────────────────────────────────────────────────
+
+  _onPointerDown(room) {
+    const ha = room.hold_action;
+    if (!ha || ha.action === 'none') return;
+    const t = setTimeout(() => {
+      this._holdTimers.delete(room.id);
+      this._held.add(room.id);
+      this._handleAction(room, ha);
+    }, 500);
+    this._holdTimers.set(room.id, t);
   }
 
+  _onPointerUp(room) {
+    const t = this._holdTimers.get(room.id);
+    if (t) { clearTimeout(t); this._holdTimers.delete(room.id); }
+  }
+
+  _onClick(room) {
+    // If hold already fired for this room, swallow the click
+    if (this._held.has(room.id)) {
+      this._held.delete(room.id);
+      return;
+    }
+
+    const dta = room.double_tap_action;
+    const hasDt = dta && dta.action !== 'none';
+
+    if (!hasDt) {
+      // No double-tap configured → immediate tap action
+      this._handleAction(room, room.tap_action);
+      return;
+    }
+
+    // Double-tap detection
+    const state = this._clicks.get(room.id) ?? { count: 0, timer: null };
+    clearTimeout(state.timer);
+    state.count++;
+
+    if (state.count >= 2) {
+      this._clicks.delete(room.id);
+      this._handleAction(room, dta);
+    } else {
+      state.timer = setTimeout(() => {
+        this._clicks.delete(room.id);
+        this._handleAction(room, room.tap_action);
+      }, 300);
+      this._clicks.set(room.id, state);
+    }
+  }
+
+  // ── Action dispatch ───────────────────────────────────────────────────────
+
   _handleAction(room, cfg) {
-    if (!cfg) return;
-    switch (cfg.action ?? 'none') {
+    if (!cfg || cfg.action === 'none') return;
+    switch (cfg.action) {
       case 'navigate':
         navigate(cfg.navigation_path ?? '/');
         break;
       case 'more-info':
-        fireEvent(this, 'hass-more-info', { entityId: cfg.entity ?? room.light_entity ?? '' });
+        fireEvent(this, 'hass-more-info', {
+          entityId: cfg.entity ?? room.light_entity ?? '',
+        });
         break;
       case 'toggle':
         if (room.light_entity && this.hass)
-          this.hass.callService('homeassistant', 'toggle', { entity_id: room.light_entity });
+          this.hass.callService('homeassistant', 'toggle', {
+            entity_id: room.light_entity,
+          });
         break;
     }
   }
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   render() {
     if (!this._config) return nothing;
@@ -197,47 +295,72 @@ class RoomNavbarCard extends LitElement {
 
   _renderRoom(room) {
     const filter  = this._computeFilter(room);
-    const tempVal = room.temp_sensor     ? this.hass?.states[room.temp_sensor]?.state     : null;
-    const humVal  = room.humidity_sensor ? this.hass?.states[room.humidity_sensor]?.state : null;
+    const tempVal = room.temp_sensor
+      ? this.hass?.states[room.temp_sensor]?.state : null;
+    const humVal  = room.humidity_sensor
+      ? this.hass?.states[room.humidity_sensor]?.state : null;
+    const label   = room.label ?? '';
 
     return html`
       <div class="room-btn"
-        @click=${() => this._handleAction(room, room.tap_action)}>
+        @click=${() => this._onClick(room)}
+        @pointerdown=${() => this._onPointerDown(room)}
+        @pointerup=${() => this._onPointerUp(room)}
+        @pointercancel=${() => this._onPointerUp(room)}>
+
+        <!-- Background image with filter -->
         <div class="room-bg" style="
           background-image: url('${room.image_url ?? ''}');
           filter: ${filter};
           transition-duration: ${room.transition_filter ?? '1.5s'};
         "></div>
+
+        <!-- Optional overlay image -->
         ${room.overlay_image_url ? html`
-          <div class="room-overlay" style="
-            background-image: url('${room.overlay_image_url}');
-          "></div>
+          <div class="room-overlay"
+            style="background-image:url('${room.overlay_image_url}');"></div>
         ` : nothing}
-        <div class="room-info">
-          ${tempVal || humVal ? html`
-            <div class="room-sensors">
-              ${tempVal ? html`<span style="color:${tempColor(tempVal)}">${parseFloat(tempVal).toFixed(1)}°</span>` : nothing}
-              ${humVal  ? html`<span style="color:${humColor(humVal)}">${Math.round(parseFloat(humVal))}%</span>`  : nothing}
-            </div>
-          ` : nothing}
-          <div class="room-label">${room.id}</div>
-        </div>
+
+        <!-- Bottom gradient -->
+        <div class="room-gradient"></div>
+
+        <!-- Temperature – top-left -->
+        ${tempVal != null ? html`
+          <div class="sensor-temp" style="color:${tempColor(tempVal)}">
+            ${parseFloat(tempVal).toFixed(1)}°
+          </div>
+        ` : nothing}
+
+        <!-- Humidity – bottom-left -->
+        ${humVal != null ? html`
+          <div class="sensor-hum" style="color:${humColor(humVal)}">
+            ${Math.round(parseFloat(humVal))}%
+          </div>
+        ` : nothing}
+
+        <!-- Label – bottom-right -->
+        ${label ? html`<div class="room-label">${label}</div>` : nothing}
+
       </div>
     `;
+  }
+
+  _computeFilter(room) {
+    if (!this.hass) return room.filter_off ?? DEFAULT_OFF;
+    const ls = room.light_entity
+      ? this.hass.states[room.light_entity] : null;
+    return ls?.state === 'on'
+      ? (room.filter_on  ?? DEFAULT_ON)
+      : (room.filter_off ?? DEFAULT_OFF);
   }
 }
 
 // ── Editor ────────────────────────────────────────────────────────────────────
 
-// Entity pickers – rendered by ha-form (guaranteed to work in HA context)
 const ENTITY_SCHEMA = [
   { name: 'light_entity',    label: 'Light entity',       selector: { entity: {} } },
   { name: 'temp_sensor',     label: 'Temperature sensor', selector: { entity: { domain: 'sensor' } } },
   { name: 'humidity_sensor', label: 'Humidity sensor',    selector: { entity: { domain: 'sensor' } } },
-];
-
-const MORE_INFO_SCHEMA = [
-  { name: 'entity', label: 'Entity', selector: { entity: {} } },
 ];
 
 const ACTION_TYPES = [
@@ -245,6 +368,10 @@ const ACTION_TYPES = [
   { value: 'navigate',  label: 'Navigate to path' },
   { value: 'more-info', label: 'More info' },
   { value: 'toggle',    label: 'Toggle light' },
+];
+
+const MORE_INFO_SCHEMA = [
+  { name: 'entity', label: 'Entity', selector: { entity: {} } },
 ];
 
 class RoomNavbarCardEditor extends LitElement {
@@ -255,7 +382,7 @@ class RoomNavbarCardEditor extends LitElement {
     _expanded: { state: true },
   };
 
-  // Light DOM – ha-form must not be inside a shadow root to work reliably
+  // Light DOM – ha-form must not be inside a shadow root
   createRenderRoot() { return this; }
 
   constructor() {
@@ -268,7 +395,7 @@ class RoomNavbarCardEditor extends LitElement {
     this._config = { rooms: [], ...config };
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  // ── Mutations ─────────────────────────────────────────────────────────────
 
   _emit() {
     fireEvent(this, 'config-changed', { config: this._config });
@@ -277,7 +404,9 @@ class RoomNavbarCardEditor extends LitElement {
   _updateRoom(roomId, patch) {
     this._config = {
       ...this._config,
-      rooms: this._config.rooms.map(r => r.id === roomId ? { ...r, ...patch } : r),
+      rooms: this._config.rooms.map(r =>
+        r.id === roomId ? { ...r, ...patch } : r
+      ),
     };
     this._emit();
   }
@@ -288,15 +417,18 @@ class RoomNavbarCardEditor extends LitElement {
       ...this._config,
       rooms: [...this._config.rooms, {
         id,
-        image_url: '',
-        overlay_image_url: '',
-        light_entity: '',
-        temp_sensor: '',
-        humidity_sensor: '',
-        filter_off: DEFAULT_OFF,
-        filter_on: DEFAULT_ON,
+        label:            '',
+        image_url:        '',
+        overlay_image_url:'',
+        light_entity:     '',
+        temp_sensor:      '',
+        humidity_sensor:  '',
+        filter_off:        DEFAULT_OFF,
+        filter_on:         DEFAULT_ON,
         transition_filter: '1.5s',
-        tap_action: { action: 'navigate', navigation_path: '/lovelace/0' },
+        tap_action:        { action: 'navigate', navigation_path: '/lovelace/0' },
+        double_tap_action: { action: 'none' },
+        hold_action:       { action: 'none' },
       }],
     };
     this._expanded = new Set([...this._expanded, id]);
@@ -318,6 +450,21 @@ class RoomNavbarCardEditor extends LitElement {
     this._expanded = s;
   }
 
+  _changeRoomId(oldId, newId) {
+    newId = newId.trim();
+    if (!newId || newId === oldId) return;
+    this._config = {
+      ...this._config,
+      rooms: this._config.rooms.map(r =>
+        r.id === oldId ? { ...r, id: newId } : r
+      ),
+    };
+    const s = new Set(this._expanded);
+    s.delete(oldId); s.add(newId);
+    this._expanded = s;
+    this._emit();
+  }
+
   _updateFilter(roomId, filterKey, component, value) {
     const room = this._config.rooms.find(r => r.id === roomId);
     if (!room) return;
@@ -326,33 +473,17 @@ class RoomNavbarCardEditor extends LitElement {
     this._updateRoom(roomId, { [filterKey]: buildFilter(parsed) });
   }
 
-  _changeRoomId(oldId, newId) {
-    newId = newId.trim();
-    if (!newId || newId === oldId) return;
-    this._config = {
-      ...this._config,
-      rooms: this._config.rooms.map(r => r.id === oldId ? { ...r, id: newId } : r),
-    };
-    const s = new Set(this._expanded);
-    s.delete(oldId);
-    s.add(newId);
-    this._expanded = s;
-    this._emit();
-  }
-
-  _setTapAction(roomId, type) {
-    const room = this._config.rooms.find(r => r.id === roomId);
-    if (!room) return;
-    const cur = room.tap_action ?? {};
-    let tap;
+  _setAction(roomId, actionKey, type, room) {
+    const cur = room[actionKey] ?? {};
+    let action;
     if (type === 'navigate') {
-      tap = { action: 'navigate', navigation_path: cur.navigation_path ?? '/lovelace/0' };
+      action = { action: 'navigate', navigation_path: cur.navigation_path ?? '/lovelace/0' };
     } else if (type === 'more-info') {
-      tap = { action: 'more-info', entity: cur.entity ?? '' };
+      action = { action: 'more-info', entity: cur.entity ?? '' };
     } else {
-      tap = { action: type };
+      action = { action: type };
     }
-    this._updateRoom(roomId, { tap_action: tap });
+    this._updateRoom(roomId, { [actionKey]: action });
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -370,12 +501,12 @@ class RoomNavbarCardEditor extends LitElement {
           <div class="rnc-empty">No rooms yet – click <em>+ Add room</em> to start.</div>
         ` : nothing}
 
-        ${this._config.rooms.map(room => this._renderRoom(room))}
+        ${this._config.rooms.map(room => this._renderRoomCard(room))}
       </div>
     `;
   }
 
-  _renderRoom(room) {
+  _renderRoomCard(room) {
     const open = this._expanded.has(room.id);
     return html`
       <div class="rnc-room-card">
@@ -384,7 +515,7 @@ class RoomNavbarCardEditor extends LitElement {
           this._toggleExpand(room.id);
         }}>
           <span class="rnc-chevron ${open ? 'open' : ''}">▶</span>
-          <span class="rnc-room-name">${room.id || '(unnamed)'}</span>
+          <span class="rnc-room-name">${room.label || room.id || '(unnamed)'}</span>
           <button class="rnc-btn-delete" data-del="1"
             @click=${e => { e.stopPropagation(); this._deleteRoom(room.id); }}>🗑</button>
         </div>
@@ -394,16 +525,23 @@ class RoomNavbarCardEditor extends LitElement {
   }
 
   _renderBody(room) {
-    const tapType = room.tap_action?.action ?? 'none';
     return html`
       <div class="rnc-body">
 
-        <!-- Room ID -->
+        <!-- Room ID (internal key) -->
         <div class="rnc-row">
           <label class="rnc-lbl">Room ID</label>
           <input class="rnc-inp" type="text" .value=${room.id}
             placeholder="bedroom"
             @change=${e => this._changeRoomId(room.id, e.target.value)}>
+        </div>
+
+        <!-- Display label -->
+        <div class="rnc-row">
+          <label class="rnc-lbl">Label <span class="rnc-hint">(shown on card)</span></label>
+          <input class="rnc-inp" type="text" .value=${room.label ?? ''}
+            placeholder="Bedroom (leave empty to hide)"
+            @input=${e => this._updateRoom(room.id, { label: e.target.value })}>
         </div>
 
         <!-- Images -->
@@ -437,7 +575,7 @@ class RoomNavbarCardEditor extends LitElement {
         <!-- Filter sliders -->
         <div class="rnc-sub">Image filters</div>
         <div class="rnc-filters">
-          ${this._renderFilter(room, 'filter_off', '🌙 Night / Off')}
+          ${this._renderFilter(room, 'filter_off', '🌙 Off / Night')}
           ${this._renderFilter(room, 'filter_on',  '💡 Light ON')}
         </div>
         <div class="rnc-row" style="margin-top:6px">
@@ -449,41 +587,57 @@ class RoomNavbarCardEditor extends LitElement {
 
         <!-- Tap action -->
         <div class="rnc-sub">Tap action</div>
-        <div class="rnc-row">
-          <label class="rnc-lbl">Action</label>
-          <select class="rnc-inp"
-            @change=${e => this._setTapAction(room.id, e.target.value)}>
-            ${ACTION_TYPES.map(t => html`
-              <option value="${t.value}" ?selected=${t.value === tapType}>${t.label}</option>
-            `)}
-          </select>
-        </div>
+        ${this._renderActionSection(room, 'tap_action')}
 
-        ${tapType === 'navigate' ? html`
-          <div class="rnc-row">
-            <label class="rnc-lbl">Path</label>
-            <input class="rnc-inp" type="text"
-              .value=${room.tap_action?.navigation_path ?? ''}
-              placeholder="/lovelace/bedroom"
-              @input=${e => this._updateRoom(room.id, {
-                tap_action: { ...room.tap_action, navigation_path: e.target.value },
-              })}>
-          </div>
-        ` : nothing}
+        <!-- Double-tap action -->
+        <div class="rnc-sub">Double-tap action</div>
+        ${this._renderActionSection(room, 'double_tap_action')}
 
-        ${tapType === 'more-info' ? html`
-          <ha-form
-            .hass=${this.hass}
-            .data=${{ entity: room.tap_action?.entity ?? '' }}
-            .schema=${MORE_INFO_SCHEMA}
-            .computeLabel=${s => s.label}
-            @value-changed=${e => this._updateRoom(room.id, {
-              tap_action: { ...room.tap_action, ...e.detail.value },
-            })}>
-          </ha-form>
-        ` : nothing}
+        <!-- Hold action -->
+        <div class="rnc-sub">Hold action <span class="rnc-hint">(500 ms)</span></div>
+        ${this._renderActionSection(room, 'hold_action')}
 
       </div>
+    `;
+  }
+
+  _renderActionSection(room, actionKey) {
+    const cfg  = room[actionKey] ?? { action: 'none' };
+    const type = cfg.action ?? 'none';
+    return html`
+      <div class="rnc-row">
+        <label class="rnc-lbl">Action</label>
+        <select class="rnc-inp"
+          @change=${e => this._setAction(room.id, actionKey, e.target.value, room)}>
+          ${ACTION_TYPES.map(t => html`
+            <option value="${t.value}" ?selected=${t.value === type}>${t.label}</option>
+          `)}
+        </select>
+      </div>
+
+      ${type === 'navigate' ? html`
+        <div class="rnc-row">
+          <label class="rnc-lbl">Path</label>
+          <input class="rnc-inp" type="text"
+            .value=${cfg.navigation_path ?? ''}
+            placeholder="/lovelace/bedroom"
+            @input=${e => this._updateRoom(room.id, {
+              [actionKey]: { ...cfg, navigation_path: e.target.value },
+            })}>
+        </div>
+      ` : nothing}
+
+      ${type === 'more-info' ? html`
+        <ha-form
+          .hass=${this.hass}
+          .data=${{ entity: cfg.entity ?? '' }}
+          .schema=${MORE_INFO_SCHEMA}
+          .computeLabel=${s => s.label}
+          @value-changed=${e => this._updateRoom(room.id, {
+            [actionKey]: { ...cfg, ...e.detail.value },
+          })}>
+        </ha-form>
+      ` : nothing}
     `;
   }
 
@@ -516,7 +670,7 @@ class RoomNavbarCardEditor extends LitElement {
     `;
   }
 
-  // ── Styles (light DOM – injected as <style> tag) ───────────────────────────
+  // ── Styles (injected into light DOM) ─────────────────────────────────────
 
   _styles() {
     return html`<style>
@@ -572,6 +726,7 @@ class RoomNavbarCardEditor extends LitElement {
 
       .rnc-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
       .rnc-lbl { flex: 0 0 140px; font-size: 12px; color: var(--secondary-text-color); }
+      .rnc-hint { font-size: 10px; opacity: .7; font-style: italic; }
       .rnc-inp {
         flex: 1; padding: 7px 10px;
         background: var(--input-fill-color, rgba(255,255,255,0.06));
@@ -588,7 +743,6 @@ class RoomNavbarCardEditor extends LitElement {
         border-top: 1px solid var(--divider-color, rgba(255,255,255,0.08));
       }
 
-      /* Filter blocks */
       .rnc-filters { display: flex; gap: 8px; flex-wrap: wrap; }
       .rnc-filter-block {
         flex: 1; min-width: 140px;
@@ -641,7 +795,7 @@ if (!window.customCards.find(c => c.type === CARD_TAG)) {
   window.customCards.push({
     type:        CARD_TAG,
     name:        'Room Navbar Card',
-    description: 'Shared navigation bar with per-room images, filters, temperature and humidity.',
+    description: 'Scrollable navigation bar with per-room images, filters, temperature and humidity.',
     preview:     true,
   });
 }
