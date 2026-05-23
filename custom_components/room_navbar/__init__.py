@@ -95,81 +95,95 @@ async def _async_register_lovelace_resource(
 ) -> None:
     """Přidá/aktualizuje JS kartu v Lovelace resources (storage mód).
 
-    Volá se po EVENT_HOMEASSISTANT_STARTED. Přistupuje k lovelace.resources
-    jako k objektu (ne dict) – tak jak to funguje v HA 2024+.
-    Pokud resources ještě nejsou načtené, zkusí to znovu za 5 s.
+    Importujeme LOVELACE_DATA a MODE_STORAGE až zde (uvnitř funkce),
+    aby import neselhal pokud by lovelace komponenta nebyla ještě inicializovaná.
+
+    Workaround pro HA bug #165767: async_create_item() / async_items() nemají
+    lazy-load guard → MUSÍME explicitně volat await resources.async_load()
+    před jakoukoliv operací, jinak hrozí přepsání celého storage souboru.
     """
     try:
-        lovelace = hass.data.get("lovelace")
-        if lovelace is None:
-            _LOGGER.debug("Room Navbar: hass.data['lovelace'] není dostupné")
-            return
-
-        # V YAML módu resources API neexistuje
-        if getattr(lovelace, "mode", None) != "storage":
-            _LOGGER.debug(
-                "Room Navbar: Lovelace není v storage módu (mód: %s) – "
-                "resource přidej ručně do ui-lovelace.yaml",
-                getattr(lovelace, "mode", "neznámý"),
-            )
-            return
-
-        resources = getattr(lovelace, "resources", None)
-        if resources is None:
-            _LOGGER.debug("Room Navbar: lovelace.resources není dostupné")
-            return
-
-        # Resources ještě nemusí být načtené – pokud ne, retry za 5 s
-        if not resources.loaded:
-            _LOGGER.debug("Room Navbar: resources ještě nejsou načtené, zkusím za 5 s")
-
-            async def _retry(_now: Any) -> None:
-                await _async_register_lovelace_resource(hass, url, version)
-
-            async_call_later(hass, 5, _retry)
-            return
-
-        versioned_url = f"{url}?v={version}"
-        base_url = url  # bez ?v=... pro porovnání existujících
-
-        existing = [
-            r for r in resources.async_items()
-            if r["url"].split("?")[0] == base_url
-        ]
-
-        if existing:
-            resource = existing[0]
-            current_version = resource["url"].split("?v=")[-1] if "?v=" in resource["url"] else "0"
-            if current_version == version:
-                _LOGGER.debug("Room Navbar: resource '%s' je aktuální (v%s)", url, version)
-                return
-            # Aktualizuj URL na novou verzi
-            await resources.async_update_item(
-                resource["id"],
-                {"res_type": "module", "url": versioned_url},
-            )
-            _LOGGER.info(
-                "Room Navbar: Lovelace resource aktualizován na v%s: %s "
-                "– proveď Ctrl+Shift+R v prohlížeči.",
-                version, versioned_url,
-            )
-        else:
-            await resources.async_create_item(
-                {"res_type": "module", "url": versioned_url}
-            )
-            _LOGGER.info(
-                "Room Navbar: Lovelace resource automaticky přidán: %s "
-                "– proveď Ctrl+Shift+R v prohlížeči.",
-                versioned_url,
-            )
-
-    except Exception:  # noqa: BLE001
+        # Import uvnitř funkce – lovelace je zaručeně načteno až po
+        # EVENT_HOMEASSISTANT_STARTED, takže import je v tuto chvíli bezpečný
+        from homeassistant.components.lovelace import LOVELACE_DATA  # noqa: PLC0415
+        from homeassistant.components.lovelace.const import MODE_STORAGE  # noqa: PLC0415
+    except ImportError:
         _LOGGER.warning(
-            "Room Navbar: Automatická registrace Lovelace resource selhala. "
-            "Přidej ručně: Nastavení → Dashboardy → Resources → '%s?v=%s' (JavaScript module). "
-            "Poté Ctrl+Shift+R.",
-            url,
-            version,
+            "Room Navbar: Nepodařilo se importovat lovelace konstanty. "
+            "Přidej resource ručně: '%s?v=%s' (JavaScript module).",
+            url, version,
+        )
+        return
+
+    lovelace_data = hass.data.get(LOVELACE_DATA)
+    if lovelace_data is None:
+        _LOGGER.debug(
+            "Room Navbar: hass.data[LOVELACE_DATA] není dostupné "
+            "(LOVELACE_DATA=%r). Zkouším znovu za 10 s.",
+            LOVELACE_DATA,
+        )
+        async def _retry_no_data(_now: Any) -> None:
+            await _async_register_lovelace_resource(hass, url, version)
+        async_call_later(hass, 10, _retry_no_data)
+        return
+
+    # LovelaceData dataclass má 'resource_mode', NE 'mode'
+    resource_mode = getattr(lovelace_data, "resource_mode", None)
+    if resource_mode != MODE_STORAGE:
+        _LOGGER.debug(
+            "Room Navbar: Lovelace resources jsou v '%s' módu (ne storage) – "
+            "resource přidej ručně do ui-lovelace.yaml",
+            resource_mode,
+        )
+        return
+
+    resources = getattr(lovelace_data, "resources", None)
+    if resources is None:
+        _LOGGER.debug("Room Navbar: lovelace_data.resources je None")
+        return
+
+    # KRITICKÉ: explicitní async_load() před jakoukoliv operací.
+    # Workaround pro HA bug #165767 – async_items() a async_create_item()
+    # nemají lazy-load guard; bez tohoto volání hrozí přepsání storage souboru.
+    await resources.async_load()
+
+    versioned_url = f"{url}?v={version}"
+
+    existing = [
+        r for r in resources.async_items()
+        if r["url"].split("?")[0] == url
+    ]
+
+    if existing:
+        resource = existing[0]
+        current_version = (
+            resource["url"].split("?v=")[-1]
+            if "?v=" in resource["url"]
+            else "0"
+        )
+        if current_version == version:
+            _LOGGER.debug(
+                "Room Navbar: resource '%s' je aktuální (v%s)", url, version
+            )
+            return
+        # Aktualizuj URL na novou verzi
+        await resources.async_update_item(
+            resource["id"],
+            {"res_type": "module", "url": versioned_url},
+        )
+        _LOGGER.info(
+            "Room Navbar: Lovelace resource aktualizován na v%s: %s "
+            "– proveď Ctrl+Shift+R v prohlížeči.",
+            version, versioned_url,
+        )
+    else:
+        await resources.async_create_item(
+            {"res_type": "module", "url": versioned_url}
+        )
+        _LOGGER.info(
+            "Room Navbar: Lovelace resource automaticky přidán: %s "
+            "– proveď Ctrl+Shift+R v prohlížeči.",
+            versioned_url,
         )
 
 
