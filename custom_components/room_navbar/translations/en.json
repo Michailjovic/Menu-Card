@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Room Navbar Card",
+        "description": "Enables the Room Navbar Card integration. No additional settings needed — configure menus via the dashboard card editor."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Room Navbar is already configured."
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Room Navbar Card",
+        "description": "Přidá Room Navbar integraci. Žádná další nastavení nejsou potřeba – vše se konfiguruje přes dashboard editor."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Integrace je již přidána."
+    }
+  }
+}
