@@ -1,5 +1,5 @@
 /**
- * room-navbar-card  v0.0.12
+ * room-navbar-card  v0.0.13
  *
  * Performance-optimized shared navigation menu for HA dashboards.
  *
@@ -15,7 +15,7 @@
  *   Falls back to local JS computation if sensor doesn't exist.
  */
 
-const VERSION = "0.0.12";
+const VERSION = "0.0.13";
 const CARD_TAG = "room-navbar-card";
 const EDITOR_TAG = "room-navbar-card-editor";
 const SENSOR_PREFIX = "rnc";
@@ -555,11 +555,13 @@ class RoomNavbarCardEditor extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     // Update entity pickers without re-render
-    this.shadowRoot.querySelectorAll("ha-entity-picker[data-r][data-f]").forEach(p => {
-      p.hass = hass;
-      const { r, f, ak } = p.dataset;
-      const room = this._menuConfig?.rooms.find(rm => rm.id === r);
-      if (room) p.value = ak ? (room[ak]?.[f] ?? "") : (room[f] ?? "");
+    customElements.whenDefined("ha-entity-picker").then(() => {
+      this.shadowRoot.querySelectorAll("ha-entity-picker[data-r][data-f]").forEach(p => {
+        p.hass = hass;
+        const { r, f, ak } = p.dataset;
+        const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+        if (room) p.value = ak ? (room[ak]?.[f] ?? "") : (room[f] ?? "");
+      });
     });
     if (this._availConfigs === null) this._fetchConfigs();
   }
@@ -622,6 +624,21 @@ class RoomNavbarCardEditor extends HTMLElement {
     if (this._saving || !this._menuConfig) return;
     const configId = this._cardConfig.config_id?.trim();
     if (!configId) { alert("Enter a Config ID first."); return; }
+
+    // Snapshot: read current DOM field values into model.
+    // This catches any field that is still focused and hasn't fired "input" yet.
+    const root = this.shadowRoot;
+    root.querySelectorAll("input[data-r][data-f], textarea[data-r][data-f]").forEach(el => {
+      const { r, f, ak } = el.dataset;
+      const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+      if (!room) return;
+      if (ak) {
+        if (!room[ak] || typeof room[ak] !== "object") room[ak] = {};
+        room[ak][f] = el.value.trim();
+      } else {
+        room[f] = el.value.trim();
+      }
+    });
 
     // Validation: every room must have an id
     for (const r of this._menuConfig.rooms ?? []) {
@@ -914,21 +931,17 @@ class RoomNavbarCardEditor extends HTMLElement {
 
     this._attachDomListeners();
 
-    // Propagate hass AND current value to ha-entity-picker elements.
-    // HA does not auto-propagate into shadow DOM built via innerHTML.
+    // Propagate hass + value to ha-entity-picker elements.
+    // ha-entity-picker is lazy-loaded → may not be upgraded yet when innerHTML is set.
+    // customElements.whenDefined() ensures properties are set after upgrade.
     if (this._hass) {
-      this.shadowRoot.querySelectorAll("ha-entity-picker[data-r][data-f]").forEach(p => {
-        p.hass = this._hass;
-        // Set the current entity value so the picker shows the right entity
-        const { r, f, ak } = p.dataset;
-        const room = this._menuConfig?.rooms.find(rm => rm.id === r);
-        if (room) {
-          if (ak) {
-            p.value = room[ak]?.[f] ?? "";
-          } else {
-            p.value = room[f] ?? "";
-          }
-        }
+      customElements.whenDefined("ha-entity-picker").then(() => {
+        this.shadowRoot.querySelectorAll("ha-entity-picker[data-r][data-f]").forEach(p => {
+          p.hass = this._hass;
+          const { r, f, ak } = p.dataset;
+          const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+          if (room) p.value = ak ? (room[ak]?.[f] ?? "") : (room[f] ?? "");
+        });
       });
     }
   }
@@ -1172,9 +1185,9 @@ class RoomNavbarCardEditor extends HTMLElement {
       });
     });
 
-    // Text / number fields – update without re-render
+    // Text / number fields – "input" fires on every keystroke → model always in sync
     root.querySelectorAll("input[data-r][data-f], textarea[data-r][data-f]").forEach(el => {
-      el.addEventListener("change", (e) => {
+      el.addEventListener("input", (e) => {
         const { r, f, ak } = e.target.dataset;
         if (ak) {
           // Field belonging to an action (navigation_path, json)
