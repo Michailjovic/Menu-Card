@@ -1,5 +1,5 @@
 /**
- * room-navbar-card  v0.0.14
+ * room-navbar-card  v0.0.15
  *
  * LitElement rewrite – proper HA custom card with GUI editor.
  *
@@ -13,7 +13,7 @@
 
 import { LitElement, html, css, nothing } from 'lit';
 
-const VERSION      = '0.0.14';
+const VERSION      = '0.0.15';
 const CARD_TAG     = 'room-navbar-card';
 const EDITOR_TAG   = 'room-navbar-card-editor';
 const SENSOR_PFX   = 'rnc';
@@ -330,6 +330,10 @@ class RoomNavbarCardEditor extends LitElement {
     _backendOk:    { state: true },
   };
 
+  // Disable Shadow DOM – ha-entity-picker and other HA lazy-loaded elements
+  // must live in the light DOM to be properly upgraded and styled by HA.
+  createRenderRoot() { return this; }
+
   constructor() {
     super();
     this._config       = {};
@@ -488,116 +492,119 @@ class RoomNavbarCardEditor extends LitElement {
   }
 
   // ── CSS ───────────────────────────────────────────────────────────────────
+  // No static styles – we use light DOM (createRenderRoot returns this),
+  // so styles are injected as a <style> tag inside render().
+  // All selectors are prefixed with room-navbar-card-editor to avoid leaking.
 
-  static styles = css`
-    :host { display: block; font-family: var(--paper-font-body1_-_font-family, sans-serif); }
-    * { box-sizing: border-box; }
-    .section { margin-bottom: 20px; }
-    .section-title {
-      font-size: 13px; font-weight: 600; color: var(--primary-text-color);
-      text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px;
-    }
-    .banner { padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px; line-height: 1.5; }
-    .banner.warn { background: rgba(255,152,0,.15); border: 1px solid rgba(255,152,0,.4); }
-    .banner.info { background: rgba(33,150,243,.12); border: 1px solid rgba(33,150,243,.35); }
-    .field-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-    .field-label { flex: 0 0 140px; font-size: 12px; color: var(--secondary-text-color); }
-    .field-input {
-      flex: 1; padding: 7px 10px;
-      background: var(--input-fill-color, rgba(255,255,255,0.06));
-      color: var(--primary-text-color);
-      border: 1px solid var(--divider-color, rgba(255,255,255,0.12));
-      border-radius: 6px; font-size: 13px;
-    }
-    .field-input:focus { outline: none; border-color: var(--primary-color); }
-    textarea.field-input { resize: vertical; font-family: monospace; font-size: 11px; min-height: 80px; }
-    .sub-title {
-      font-size: 11px; font-weight: 600; color: var(--secondary-text-color);
-      text-transform: uppercase; letter-spacing: .4px;
-      margin: 14px 0 6px; padding-top: 10px;
-      border-top: 1px solid var(--divider-color, rgba(255,255,255,0.08));
-    }
-    .room-card {
-      border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
-      border-radius: 10px; margin-bottom: 8px; overflow: hidden;
-    }
-    .room-header {
-      display: flex; align-items: center; gap: 8px; padding: 10px 14px;
-      background: rgba(255,255,255,0.04); cursor: pointer; user-select: none;
-    }
-    .room-header:hover { background: rgba(255,255,255,0.07); }
-    .room-chevron { font-size: 10px; color: var(--secondary-text-color); transition: transform .2s; }
-    .room-chevron.open { transform: rotate(90deg); }
-    .room-title { flex: 1; font-size: 13px; font-weight: 500; }
-    .room-badge {
-      font-size: 10px; color: var(--secondary-text-color);
-      background: rgba(255,255,255,0.07); border-radius: 4px; padding: 2px 6px;
-    }
-    .btn-delete {
-      background: none; border: none; cursor: pointer; font-size: 14px;
-      color: var(--error-color, #cf6679); padding: 4px; border-radius: 4px;
-    }
-    .room-body { padding: 14px; }
-    .btn-primary {
-      padding: 10px 20px; background: var(--primary-color); color: #fff;
-      border: none; border-radius: 8px; font-size: 14px; font-weight: 600;
-      cursor: pointer;
-    }
-    .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
-    .btn-secondary {
-      padding: 6px 12px; background: rgba(255,255,255,0.07);
-      color: var(--primary-text-color);
-      border: 1px solid var(--divider-color, rgba(255,255,255,0.12));
-      border-radius: 6px; font-size: 12px; cursor: pointer;
-    }
-    .save-row { display: flex; align-items: center; gap: 14px; }
-    .status-ok  { font-size: 13px; color: var(--success-color, #4caf50); }
-    .status-err { font-size: 13px; color: var(--error-color, #cf6679); }
-    .empty-rooms {
-      font-size: 13px; color: var(--secondary-text-color);
-      padding: 20px; text-align: center;
-      border: 1px dashed var(--divider-color, rgba(255,255,255,0.1)); border-radius: 8px;
-    }
-    ha-entity-picker { flex: 1; }
-    .transition-row { display: flex; gap: 8px; }
-    .transition-row .field-row { flex: 1; }
-    .action-block {
-      padding: 10px; background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(255,255,255,0.07); border-radius: 8px; margin-bottom: 8px;
-    }
-    .action-label { font-size: 11px; color: var(--secondary-text-color); margin-bottom: 6px; }
-
-    /* Filter panels */
-    .filter-panels { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
-    .filter-block {
-      flex: 1; min-width: 140px;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 8px; padding: 10px 12px;
-    }
-    .filter-title {
-      font-size: 10px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .5px; color: var(--secondary-text-color); margin-bottom: 8px;
-    }
-    .filter-preview-bar {
-      width: 100%; height: 32px; border-radius: 5px; margin-bottom: 10px;
-      background: linear-gradient(135deg,
-        #0d1b2a 0%, #1b3a5c 20%, #2e6da4 40%, #e8a045 60%, #f5d76e 80%, #fff 100%);
-      transition: filter .4s ease;
-    }
-    .filter-slider-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
-    .filter-prop { flex: 0 0 22px; font-size: 13px; text-align: center; }
-    .filter-slider { flex: 1; height: 4px; cursor: pointer; accent-color: var(--primary-color); }
-    .filter-val {
-      flex: 0 0 38px; font-size: 10px; text-align: right;
-      color: var(--primary-text-color); font-family: monospace;
-    }
-    .filter-raw {
-      font-size: 9px; color: var(--secondary-text-color); font-family: monospace;
-      margin-top: 7px; word-break: break-all; line-height: 1.4;
-      padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);
-    }
-  `;
+  _editorStyles() {
+    return html`<style>
+      room-navbar-card-editor { display: block; }
+      room-navbar-card-editor *, room-navbar-card-editor *::before, room-navbar-card-editor *::after { box-sizing: border-box; }
+      room-navbar-card-editor .rnc-section { margin-bottom: 20px; }
+      room-navbar-card-editor .rnc-section-title {
+        font-size: 13px; font-weight: 600; color: var(--primary-text-color);
+        text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px;
+      }
+      room-navbar-card-editor .rnc-banner { padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px; line-height: 1.5; }
+      room-navbar-card-editor .rnc-banner.rnc-banner--warn { background: rgba(255,152,0,.15); border: 1px solid rgba(255,152,0,.4); }
+      room-navbar-card-editor .rnc-banner.rnc-banner--info { background: rgba(33,150,243,.12); border: 1px solid rgba(33,150,243,.35); }
+      room-navbar-card-editor .rnc-field-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+      room-navbar-card-editor .rnc-field-label { flex: 0 0 140px; font-size: 12px; color: var(--secondary-text-color); }
+      room-navbar-card-editor .rnc-field-input {
+        flex: 1; padding: 7px 10px;
+        background: var(--input-fill-color, rgba(255,255,255,0.06));
+        color: var(--primary-text-color);
+        border: 1px solid var(--divider-color, rgba(255,255,255,0.12));
+        border-radius: 6px; font-size: 13px;
+      }
+      room-navbar-card-editor .rnc-field-input:focus { outline: none; border-color: var(--primary-color); }
+      room-navbar-card-editor textarea.rnc-field-input { resize: vertical; font-family: monospace; font-size: 11px; min-height: 80px; }
+      room-navbar-card-editor .rnc-sub-title {
+        font-size: 11px; font-weight: 600; color: var(--secondary-text-color);
+        text-transform: uppercase; letter-spacing: .4px;
+        margin: 14px 0 6px; padding-top: 10px;
+        border-top: 1px solid var(--divider-color, rgba(255,255,255,0.08));
+      }
+      room-navbar-card-editor .rnc-room-card {
+        border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
+        border-radius: 10px; margin-bottom: 8px; overflow: hidden;
+      }
+      room-navbar-card-editor .rnc-room-header {
+        display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+        background: rgba(255,255,255,0.04); cursor: pointer; user-select: none;
+      }
+      room-navbar-card-editor .rnc-room-header:hover { background: rgba(255,255,255,0.07); }
+      room-navbar-card-editor .rnc-room-chevron { font-size: 10px; color: var(--secondary-text-color); transition: transform .2s; }
+      room-navbar-card-editor .rnc-room-chevron.open { transform: rotate(90deg); }
+      room-navbar-card-editor .rnc-room-title { flex: 1; font-size: 13px; font-weight: 500; }
+      room-navbar-card-editor .rnc-room-badge {
+        font-size: 10px; color: var(--secondary-text-color);
+        background: rgba(255,255,255,0.07); border-radius: 4px; padding: 2px 6px;
+      }
+      room-navbar-card-editor .rnc-btn-delete {
+        background: none; border: none; cursor: pointer; font-size: 14px;
+        color: var(--error-color, #cf6679); padding: 4px; border-radius: 4px;
+      }
+      room-navbar-card-editor .rnc-room-body { padding: 14px; }
+      room-navbar-card-editor .rnc-btn-primary {
+        padding: 10px 20px; background: var(--primary-color); color: #fff;
+        border: none; border-radius: 8px; font-size: 14px; font-weight: 600;
+        cursor: pointer;
+      }
+      room-navbar-card-editor .rnc-btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+      room-navbar-card-editor .rnc-btn-secondary {
+        padding: 6px 12px; background: rgba(255,255,255,0.07);
+        color: var(--primary-text-color);
+        border: 1px solid var(--divider-color, rgba(255,255,255,0.12));
+        border-radius: 6px; font-size: 12px; cursor: pointer;
+      }
+      room-navbar-card-editor .rnc-save-row { display: flex; align-items: center; gap: 14px; }
+      room-navbar-card-editor .rnc-status-ok  { font-size: 13px; color: var(--success-color, #4caf50); }
+      room-navbar-card-editor .rnc-status-err { font-size: 13px; color: var(--error-color, #cf6679); }
+      room-navbar-card-editor .rnc-empty-rooms {
+        font-size: 13px; color: var(--secondary-text-color);
+        padding: 20px; text-align: center;
+        border: 1px dashed var(--divider-color, rgba(255,255,255,0.1)); border-radius: 8px;
+      }
+      room-navbar-card-editor ha-entity-picker { display: block; flex: 1; }
+      room-navbar-card-editor .rnc-transition-row { display: flex; gap: 8px; }
+      room-navbar-card-editor .rnc-transition-row .rnc-field-row { flex: 1; }
+      room-navbar-card-editor .rnc-action-block {
+        padding: 10px; background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.07); border-radius: 8px; margin-bottom: 8px;
+      }
+      room-navbar-card-editor .rnc-action-label { font-size: 11px; color: var(--secondary-text-color); margin-bottom: 6px; }
+      room-navbar-card-editor .rnc-filter-panels { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+      room-navbar-card-editor .rnc-filter-block {
+        flex: 1; min-width: 140px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 8px; padding: 10px 12px;
+      }
+      room-navbar-card-editor .rnc-filter-title {
+        font-size: 10px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: .5px; color: var(--secondary-text-color); margin-bottom: 8px;
+      }
+      room-navbar-card-editor .rnc-filter-preview-bar {
+        width: 100%; height: 32px; border-radius: 5px; margin-bottom: 10px;
+        background: linear-gradient(135deg,
+          #0d1b2a 0%, #1b3a5c 20%, #2e6da4 40%, #e8a045 60%, #f5d76e 80%, #fff 100%);
+        transition: filter .4s ease;
+      }
+      room-navbar-card-editor .rnc-filter-slider-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+      room-navbar-card-editor .rnc-filter-prop { flex: 0 0 22px; font-size: 13px; text-align: center; }
+      room-navbar-card-editor .rnc-filter-slider { flex: 1; height: 4px; cursor: pointer; accent-color: var(--primary-color); }
+      room-navbar-card-editor .rnc-filter-val {
+        flex: 0 0 38px; font-size: 10px; text-align: right;
+        color: var(--primary-text-color); font-family: monospace;
+      }
+      room-navbar-card-editor .rnc-filter-raw {
+        font-size: 9px; color: var(--secondary-text-color); font-family: monospace;
+        margin-top: 7px; word-break: break-all; line-height: 1.4;
+        padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);
+      }
+    </style>`;
+  }
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -608,34 +615,35 @@ class RoomNavbarCardEditor extends LitElement {
     const otherConfs = (this._availConfigs ?? []).filter(c => c.id !== configId);
 
     return html`
+      ${this._editorStyles()}
       ${!this._backendOk ? html`
-        <div class="banner warn">
+        <div class="rnc-banner rnc-banner--warn">
           ⚠️ Integration <strong>Room Navbar</strong> not found.
           Add it via <em>Settings → Integrations</em>.
         </div>
       ` : nothing}
 
       ${this._backendOk && configId && !availIds.includes(configId) ? html`
-        <div class="banner info">
+        <div class="rnc-banner rnc-banner--info">
           ✨ Config <strong>${configId}</strong> doesn't exist yet – fill in rooms and click Save.
         </div>
       ` : nothing}
 
       <!-- Config ID -->
-      <div class="section">
-        <div class="section-title">Configuration</div>
-        <div class="field-row">
-          <label class="field-label">Config ID</label>
-          <input class="field-input" type="text"
+      <div class="rnc-section">
+        <div class="rnc-section-title">Configuration</div>
+        <div class="rnc-field-row">
+          <label class="rnc-field-label">Config ID</label>
+          <input class="rnc-field-input" type="text"
             .value=${configId}
             placeholder="main_navbar"
             @change=${e => this._onConfigIdChange(e.target.value.trim())}>
         </div>
 
         ${otherConfs.length ? html`
-          <div class="field-row">
-            <label class="field-label">Load existing</label>
-            <select class="field-input"
+          <div class="rnc-field-row">
+            <label class="rnc-field-label">Load existing</label>
+            <select class="rnc-field-input"
               @change=${e => { if (e.target.value) this._onLoadExisting(e.target.value); e.target.value = ''; }}>
               <option value="">── select ──</option>
               ${otherConfs.map(c => html`<option value="${c.id}">${c.name} (${c.room_count})</option>`)}
@@ -643,9 +651,9 @@ class RoomNavbarCardEditor extends LitElement {
           </div>
         ` : nothing}
 
-        <div class="field-row">
-          <label class="field-label">Menu name</label>
-          <input class="field-input" type="text"
+        <div class="rnc-field-row">
+          <label class="rnc-field-label">Menu name</label>
+          <input class="rnc-field-input" type="text"
             .value=${menu?.name ?? configId}
             placeholder="Main Navbar"
             @input=${e => { if (this._menuConfig) this._menuConfig = { ...this._menuConfig, name: e.target.value }; }}>
@@ -654,43 +662,43 @@ class RoomNavbarCardEditor extends LitElement {
 
       ${menu !== null ? html`
         <!-- Rooms -->
-        <div class="section">
-          <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+        <div class="rnc-section">
+          <div class="rnc-section-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Rooms (${menu.rooms.length})</span>
-            <button class="btn-secondary" @click=${() => this._addRoom()}>+ Add room</button>
+            <button class="rnc-btn-secondary" @click=${() => this._addRoom()}>+ Add room</button>
           </div>
           ${menu.rooms.length === 0 ? html`
-            <div class="empty-rooms">No rooms. Click <em>Add room</em> to start.</div>
+            <div class="rnc-empty-rooms">No rooms. Click <em>Add room</em> to start.</div>
           ` : nothing}
           ${menu.rooms.map((room, i) => this._renderRoom(room, i))}
         </div>
 
         <!-- Save -->
-        <div class="section save-row">
-          <button class="btn-primary"
+        <div class="rnc-section rnc-save-row">
+          <button class="rnc-btn-primary"
             ?disabled=${this._saving}
             @click=${() => this._saveConfig()}>
             ${this._saving ? 'Saving…' : '💾 Save configuration'}
           </button>
-          ${this._saveStatus === 'ok' ? html`<span class="status-ok">✓ Saved</span>` : nothing}
-          ${this._saveStatus === 'err' ? html`<span class="status-err">✗ Error – check browser console</span>` : nothing}
+          ${this._saveStatus === 'ok' ? html`<span class="rnc-status-ok">✓ Saved</span>` : nothing}
+          ${this._saveStatus === 'err' ? html`<span class="rnc-status-err">✗ Error – check browser console</span>` : nothing}
         </div>
-      ` : html`<div class="empty-rooms">Loading…</div>`}
+      ` : html`<div class="rnc-empty-rooms">Loading…</div>`}
     `;
   }
 
   _renderRoom(room) {
     const open = this._expanded.has(room.id);
     return html`
-      <div class="room-card">
-        <div class="room-header" @click=${e => {
+      <div class="rnc-room-card">
+        <div class="rnc-room-header" @click=${e => {
           if (e.target.closest('[data-delete]')) return;
           this._toggleExpand(room.id);
         }}>
-          <span class="room-chevron ${open ? 'open' : ''}">▶</span>
-          <span class="room-title">${room.id || '(unnamed)'}</span>
-          ${room.light_entity ? html`<span class="room-badge">${room.light_entity}</span>` : nothing}
-          <button class="btn-delete" data-delete="1"
+          <span class="rnc-room-chevron ${open ? 'open' : ''}">▶</span>
+          <span class="rnc-room-title">${room.id || '(unnamed)'}</span>
+          ${room.light_entity ? html`<span class="rnc-room-badge">${room.light_entity}</span>` : nothing}
+          <button class="rnc-btn-delete" data-delete="1"
             @click=${e => { e.stopPropagation(); if (confirm(`Delete room "${room.id}"?`)) this._deleteRoom(room.id); }}>
             🗑
           </button>
@@ -702,18 +710,18 @@ class RoomNavbarCardEditor extends LitElement {
 
   _renderRoomBody(room) {
     return html`
-      <div class="room-body">
+      <div class="rnc-room-body">
 
         <!-- Basic -->
-        <div class="sub-title">Basic</div>
-        <div class="field-row">
-          <label class="field-label">Room ID</label>
-          <input class="field-input" type="text" .value=${room.id}
+        <div class="rnc-sub-title">Basic</div>
+        <div class="rnc-field-row">
+          <label class="rnc-field-label">Room ID</label>
+          <input class="rnc-field-input" type="text" .value=${room.id}
             placeholder="bedroom"
             @input=${e => this._updateRoom(room.id, { id: e.target.value })}>
         </div>
-        <div class="field-row">
-          <label class="field-label">Light (entity)</label>
+        <div class="rnc-field-row">
+          <label class="rnc-field-label">Light (entity)</label>
           <ha-entity-picker
             .hass=${this.hass}
             .value=${room.light_entity ?? ''}
@@ -721,23 +729,23 @@ class RoomNavbarCardEditor extends LitElement {
             @value-changed=${e => this._updateRoom(room.id, { light_entity: e.detail.value ?? '' })}>
           </ha-entity-picker>
         </div>
-        <div class="field-row">
-          <label class="field-label">Background URL</label>
-          <input class="field-input" type="text" .value=${room.image_url ?? ''}
+        <div class="rnc-field-row">
+          <label class="rnc-field-label">Background URL</label>
+          <input class="rnc-field-input" type="text" .value=${room.image_url ?? ''}
             placeholder="/local/Dashboards/Rooms/Bedroom.webp"
             @input=${e => this._updateRoom(room.id, { image_url: e.target.value })}>
         </div>
-        <div class="field-row">
-          <label class="field-label">Overlay URL</label>
-          <input class="field-input" type="text" .value=${room.overlay_image_url ?? ''}
+        <div class="rnc-field-row">
+          <label class="rnc-field-label">Overlay URL</label>
+          <input class="rnc-field-input" type="text" .value=${room.overlay_image_url ?? ''}
             placeholder="/local/.../overlay.webp (optional)"
             @input=${e => this._updateRoom(room.id, { overlay_image_url: e.target.value })}>
         </div>
 
         <!-- Sensors -->
-        <div class="sub-title">Sensors</div>
-        <div class="field-row">
-          <label class="field-label">Temperature</label>
+        <div class="rnc-sub-title">Sensors</div>
+        <div class="rnc-field-row">
+          <label class="rnc-field-label">Temperature</label>
           <ha-entity-picker
             .hass=${this.hass}
             .value=${room.temp_sensor ?? ''}
@@ -745,8 +753,8 @@ class RoomNavbarCardEditor extends LitElement {
             @value-changed=${e => this._updateRoom(room.id, { temp_sensor: e.detail.value ?? '' })}>
           </ha-entity-picker>
         </div>
-        <div class="field-row">
-          <label class="field-label">Humidity</label>
+        <div class="rnc-field-row">
+          <label class="rnc-field-label">Humidity</label>
           <ha-entity-picker
             .hass=${this.hass}
             .value=${room.humidity_sensor ?? ''}
@@ -756,27 +764,27 @@ class RoomNavbarCardEditor extends LitElement {
         </div>
 
         <!-- Filters -->
-        <div class="sub-title">Image Filters &amp; Transitions</div>
-        <div class="filter-panels">
+        <div class="rnc-sub-title">Image Filters &amp; Transitions</div>
+        <div class="rnc-filter-panels">
           ${this._renderFilterBlock(room, 'filter_off', '🌙 Night / Off')}
           ${this._renderFilterBlock(room, 'filter_on',  '💡 Light ON')}
           ${this._renderFilterBlock(room, 'filter_day', '☀️ Day')}
         </div>
-        <div class="transition-row">
-          <div class="field-row">
-            <label class="field-label">Filter transition</label>
-            <input class="field-input" type="text" .value=${room.transition_filter ?? '1.5s'}
+        <div class="rnc-transition-row">
+          <div class="rnc-field-row">
+            <label class="rnc-field-label">Filter transition</label>
+            <input class="rnc-field-input" type="text" .value=${room.transition_filter ?? '1.5s'}
               @input=${e => this._updateRoom(room.id, { transition_filter: e.target.value })}>
           </div>
-          <div class="field-row">
-            <label class="field-label">Overlay transition</label>
-            <input class="field-input" type="text" .value=${room.transition_overlay ?? '2.0s'}
+          <div class="rnc-field-row">
+            <label class="rnc-field-label">Overlay transition</label>
+            <input class="rnc-field-input" type="text" .value=${room.transition_overlay ?? '2.0s'}
               @input=${e => this._updateRoom(room.id, { transition_overlay: e.target.value })}>
           </div>
         </div>
 
         <!-- Actions -->
-        <div class="sub-title">Actions</div>
+        <div class="rnc-sub-title">Actions</div>
         ${this._renderActionBlock(room, 'tap_action',        'Tap')}
         ${this._renderActionBlock(room, 'hold_action',       'Hold (>500ms)')}
         ${this._renderActionBlock(room, 'double_tap_action', 'Double tap')}
@@ -789,40 +797,40 @@ class RoomNavbarCardEditor extends LitElement {
     const { brightness, saturate, sepia, hueRotate } = parseFilter(filterStr);
 
     return html`
-      <div class="filter-block">
-        <div class="filter-title">${label}</div>
-        <div class="filter-preview-bar" style="filter:${filterStr}"></div>
+      <div class="rnc-filter-block">
+        <div class="rnc-filter-title">${label}</div>
+        <div class="rnc-filter-preview-bar" style="filter:${filterStr}"></div>
 
-        <div class="filter-slider-row">
-          <span class="filter-prop" title="Brightness">☀</span>
-          <input type="range" class="filter-slider" min="0.1" max="3" step="0.05"
+        <div class="rnc-filter-slider-row">
+          <span class="rnc-filter-prop" title="Brightness">☀</span>
+          <input type="range" class="rnc-filter-slider" min="0.1" max="3" step="0.05"
             .value=${String(brightness)}
             @input=${e => this._updateFilter(room.id, filterKey, 'brightness', parseFloat(e.target.value))}>
-          <span class="filter-val">${brightness.toFixed(2)}</span>
+          <span class="rnc-filter-val">${brightness.toFixed(2)}</span>
         </div>
-        <div class="filter-slider-row">
-          <span class="filter-prop" title="Saturation">🎨</span>
-          <input type="range" class="filter-slider" min="0" max="4" step="0.05"
+        <div class="rnc-filter-slider-row">
+          <span class="rnc-filter-prop" title="Saturation">🎨</span>
+          <input type="range" class="rnc-filter-slider" min="0" max="4" step="0.05"
             .value=${String(saturate)}
             @input=${e => this._updateFilter(room.id, filterKey, 'saturate', parseFloat(e.target.value))}>
-          <span class="filter-val">${saturate.toFixed(2)}</span>
+          <span class="rnc-filter-val">${saturate.toFixed(2)}</span>
         </div>
-        <div class="filter-slider-row">
-          <span class="filter-prop" title="Sepia">🟫</span>
-          <input type="range" class="filter-slider" min="0" max="1" step="0.05"
+        <div class="rnc-filter-slider-row">
+          <span class="rnc-filter-prop" title="Sepia">🟫</span>
+          <input type="range" class="rnc-filter-slider" min="0" max="1" step="0.05"
             .value=${String(sepia)}
             @input=${e => this._updateFilter(room.id, filterKey, 'sepia', parseFloat(e.target.value))}>
-          <span class="filter-val">${sepia.toFixed(2)}</span>
+          <span class="rnc-filter-val">${sepia.toFixed(2)}</span>
         </div>
-        <div class="filter-slider-row">
-          <span class="filter-prop" title="Hue rotate">🌈</span>
-          <input type="range" class="filter-slider" min="-180" max="180" step="1"
+        <div class="rnc-filter-slider-row">
+          <span class="rnc-filter-prop" title="Hue rotate">🌈</span>
+          <input type="range" class="rnc-filter-slider" min="-180" max="180" step="1"
             .value=${String(Math.round(hueRotate))}
             @input=${e => this._updateFilter(room.id, filterKey, 'hueRotate', parseFloat(e.target.value))}>
-          <span class="filter-val">${Math.round(hueRotate)}°</span>
+          <span class="rnc-filter-val">${Math.round(hueRotate)}°</span>
         </div>
 
-        <div class="filter-raw">${filterStr || '—'}</div>
+        <div class="rnc-filter-raw">${filterStr || '—'}</div>
       </div>
     `;
   }
@@ -832,11 +840,11 @@ class RoomNavbarCardEditor extends LitElement {
     const curType   = action.action ?? 'none';
 
     return html`
-      <div class="action-block">
-        <div class="action-label">${label}</div>
-        <div class="field-row">
-          <label class="field-label">Action type</label>
-          <select class="field-input"
+      <div class="rnc-action-block">
+        <div class="rnc-action-label">${label}</div>
+        <div class="rnc-field-row">
+          <label class="rnc-field-label">Action type</label>
+          <select class="rnc-field-input"
             .value=${curType}
             @change=${e => this._setActionType(room.id, actionKey, e.target.value)}>
             ${ACTION_TYPES.map(t => html`
@@ -846,9 +854,9 @@ class RoomNavbarCardEditor extends LitElement {
         </div>
 
         ${curType === 'navigate' ? html`
-          <div class="field-row">
-            <label class="field-label">Path</label>
-            <input class="field-input" type="text"
+          <div class="rnc-field-row">
+            <label class="rnc-field-label">Path</label>
+            <input class="rnc-field-input" type="text"
               .value=${action.navigation_path ?? ''}
               placeholder="/lovelace/bedroom"
               @input=${e => this._updateAction(room.id, actionKey, { navigation_path: e.target.value })}>
@@ -856,8 +864,8 @@ class RoomNavbarCardEditor extends LitElement {
         ` : nothing}
 
         ${curType === 'more-info' ? html`
-          <div class="field-row">
-            <label class="field-label">Entity</label>
+          <div class="rnc-field-row">
+            <label class="rnc-field-label">Entity</label>
             <ha-entity-picker
               .hass=${this.hass}
               .value=${action.entity ?? ''}
@@ -868,9 +876,9 @@ class RoomNavbarCardEditor extends LitElement {
         ` : nothing}
 
         ${curType === 'call-service' ? html`
-          <div class="field-row">
-            <label class="field-label">Service JSON</label>
-            <textarea class="field-input" rows="4"
+          <div class="rnc-field-row">
+            <label class="rnc-field-label">Service JSON</label>
+            <textarea class="rnc-field-input" rows="4"
               .value=${JSON.stringify(action, null, 2)}
               @change=${e => { try { this._updateRoom(room.id, { [actionKey]: JSON.parse(e.target.value) }); } catch {} }}>
             </textarea>
