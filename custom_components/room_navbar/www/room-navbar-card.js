@@ -1,5 +1,5 @@
 /**
- * room-navbar-card  v0.0.11
+ * room-navbar-card  v0.0.12
  *
  * Performance-optimized shared navigation menu for HA dashboards.
  *
@@ -15,7 +15,7 @@
  *   Falls back to local JS computation if sensor doesn't exist.
  */
 
-const VERSION = "0.0.11";
+const VERSION = "0.0.12";
 const CARD_TAG = "room-navbar-card";
 const EDITOR_TAG = "room-navbar-card-editor";
 const SENSOR_PREFIX = "rnc";
@@ -555,7 +555,12 @@ class RoomNavbarCardEditor extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     // Update entity pickers without re-render
-    this.shadowRoot.querySelectorAll("ha-entity-picker").forEach(p => { p.hass = hass; });
+    this.shadowRoot.querySelectorAll("ha-entity-picker[data-r][data-f]").forEach(p => {
+      p.hass = hass;
+      const { r, f, ak } = p.dataset;
+      const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+      if (room) p.value = ak ? (room[ak]?.[f] ?? "") : (room[f] ?? "");
+    });
     if (this._availConfigs === null) this._fetchConfigs();
   }
 
@@ -699,6 +704,10 @@ class RoomNavbarCardEditor extends HTMLElement {
     } else {
       room[field] = value;
     }
+  }
+
+  _emitConfigChanged(extra = {}) {
+    fireEvent(this, "config-changed", { config: { ...this._cardConfig, ...extra } });
   }
 
   _setActionType(roomId, actionKey, newType) {
@@ -905,12 +914,21 @@ class RoomNavbarCardEditor extends HTMLElement {
 
     this._attachDomListeners();
 
-    // Propagate hass to ha-entity-picker elements created by innerHTML above.
-    // HA's Lovelace framework does not auto-propagate hass into shadow DOM
-    // built via innerHTML, so we do it manually after every render.
+    // Propagate hass AND current value to ha-entity-picker elements.
+    // HA does not auto-propagate into shadow DOM built via innerHTML.
     if (this._hass) {
-      this.shadowRoot.querySelectorAll("ha-entity-picker").forEach(p => {
+      this.shadowRoot.querySelectorAll("ha-entity-picker[data-r][data-f]").forEach(p => {
         p.hass = this._hass;
+        // Set the current entity value so the picker shows the right entity
+        const { r, f, ak } = p.dataset;
+        const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+        if (room) {
+          if (ak) {
+            p.value = room[ak]?.[f] ?? "";
+          } else {
+            p.value = room[f] ?? "";
+          }
+        }
       });
     }
   }
@@ -1176,15 +1194,30 @@ class RoomNavbarCardEditor extends HTMLElement {
       });
     });
 
-    // Action type selects
-    root.querySelectorAll("select[data-r][data-ak]").forEach(el => {
+    // ha-entity-picker – fires "value-changed" custom event, not "change"
+    root.querySelectorAll("ha-entity-picker[data-r][data-f]").forEach(picker => {
+      picker.addEventListener("value-changed", (e) => {
+        const { r, f, ak } = picker.dataset;
+        const value = e.detail.value ?? "";
+        if (ak) {
+          const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+          if (!room) return;
+          if (!room[ak] || typeof room[ak] !== "object") room[ak] = {};
+          room[ak][f] = value;
+        } else {
+          const room = this._menuConfig?.rooms.find(rm => rm.id === r);
+          if (!room) return;
+          room[f] = value;
+        }
+      });
+    });
+
+    // Action type selects (data-action-type attribute)
+    root.querySelectorAll("select[data-r][data-action-type]").forEach(el => {
       el.addEventListener("change", (e) => {
-        const { r, ak } = e.target.dataset;
-        const room = this._menuConfig?.rooms.find(rm => rm.id === r);
-        if (!room) return;
-        if (!room[ak] || typeof room[ak] !== "object") room[ak] = {};
-        room[ak].action = e.target.value;
-        this._render();
+        const r = e.target.dataset.r;
+        const actionKey = e.target.dataset.actionType;
+        this._setActionType(r, actionKey, e.target.value);
       });
     });
 
